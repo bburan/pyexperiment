@@ -357,6 +357,10 @@ class AbstractController(ApplyRevertControllerMixin, Controller):
 
     state = Enum('uninitialized', 'initialized', 'running', 'halted')
 
+    def init(self, info):
+        super(AbstractController, self).init(info)
+        self.model = info.object
+
     def ok_to_shutdown(self):
         return not self.is_running()
 
@@ -402,6 +406,7 @@ class AbstractController(ApplyRevertControllerMixin, Controller):
         self.initialize_context()
         self.setup_experiment(info)
         self.start_experiment(info)
+        self.state = 'running'
 
     def stop(self, info=None):
         self.stop_experiment(info)
@@ -430,12 +435,11 @@ class AbstractController(ApplyRevertControllerMixin, Controller):
         self.register_dtypes()
         self.state = 'initialized'
 
-    def start_experiment(self):
+    def start_experiment(self, info=None):
         raise NotImplementedError
-        self.state = 'running'
         self.next_trial()
 
-    def stop_experiment(self):
+    def stop_experiment(self, info=None):
         '''
         Stop experiment should be inside a guard block (self.is_running()) to
         ensure that multiple calls to this method (e.g. from other threads or
