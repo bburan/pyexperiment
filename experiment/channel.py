@@ -21,6 +21,9 @@ import logging
 log = logging.getLogger(__name__)
 
 
+################################################################################
+# Backend storage classes implemented as mixins (e.g., file, RAM, etc.)
+################################################################################
 class FileMixin(HasTraits):
     '''
     Mixin class that uses a HDF5_ EArray as the backend for the buffer.  If the
@@ -159,6 +162,112 @@ class FileMixin(HasTraits):
         return '<HDF5Store {}>'.format(self.name)
 
 
+class MemoryMixin(HasTraits):
+    '''
+    Buffers data in memory without saving it to disk.
+
+    Uses a ringbuffer algorithm designed for efficient reads (writes are not as
+    efficient, but should still be fairly quick).  The assumption is that this
+    is used for plotting data, and reads will be more common than writes (due to
+    panning, zooming and scaling).
+
+    Parameters
+    ==========
+    window
+        Number of seconds to buffer
+    '''
+
+    window = Float(10)
+    samples = Property(Int, depends_on='window, fs')
+    t0 = Property(depends_on="offset, fs")
+
+    buffer = Array
+    offset = Int(0)
+    dropped = Int(0)
+
+    partial_idx = 0
+    buffer_full = False
+
+    @cached_property
+    def _get_t0(self):
+        return self.offset/self.fs
+
+    @cached_property
+    def _get_samples(self):
+        return int(self.window * self.fs)
+
+    def _buffer_default(self):
+        return np.empty(self.samples)
+
+    def _samples_changed(self):
+        self.buffer = np.empty(self.samples)
+        self.offset = 0
+        self.dropped = 0
+        self.partial_idx = 0
+        self._write = self._partial_write
+
+    def _partial_write(self, data):
+        size = data.shape[-1]
+        if size > self.samples:
+            # If we have too much data to write to the buffer, drop the extra
+            # samples.  Offset should be incremented by the number of samples
+            # dropped.  Furthermore, we now have a "full" buffer so we switch to
+            # the _full_write method from now on.
+            self.buffer = data[..., -self.samples:]
+            self.dropped = size-self.samples
+            self.offset = size-self.samples
+            # Switch to the full write mode
+            del self.partial_idx
+            self.buffer_full = True
+            self._write = self._full_write
+        elif self.partial_idx+size > self.samples:
+            # If the number of samples available is greater than the remaining
+            # slots in the buffer, write what we can to the buffer and then
+            # switch to _full_write for the remaining samples.
+            overflow_size = (self.partial_idx+size)-self.samples
+            initial_size = size-overflow_size
+            self.buffer[..., self.partial_idx:] = data[..., :initial_size]
+            # Switch to the full write mode
+            del self.partial_idx
+            self.buffer_full = True
+            self._write = self._full_write
+            # Write the remaining samples to the buffer
+            self._write(data[..., -overflow_size:])
+        else:
+            self.buffer[..., self.partial_idx:self.partial_idx+size] = data
+            self.partial_idx += size
+
+    def _full_write(self, data):
+        size = data.shape[-1]
+        if size == 0:
+            return
+        elif size > self.samples:
+            self.buffer = data[..., -self.samples:]
+            self.dropped += size-self.samples
+            self.offset += size-self.samples
+        else:
+            # Shift elements at end of buffer to beginning so we can write new
+            # data.  Old data at beginning is discarded.  If old data is
+            # discarded, we update offset.
+            remainder = self.samples-size
+            if remainder:
+                self.buffer[..., :remainder] = self.buffer[..., -remainder:]
+                self.offset += size
+            # Write new data to end of buffer
+            self.buffer[..., -size:] = data
+
+    _write = _partial_write
+
+    def get_size(self):
+        if self.buffer_full:
+            return self.samples
+        else:
+            return self.partial_idx
+
+
+################################################################################
+# Backend storage classes (e.g., file, RAM, etc.)
+################################################################################
 class Timeseries(HasTraits):
 
     updated = Event
@@ -457,109 +566,6 @@ class FileChannel(FileMixin, Channel):
     dtype = Any(np.float32)
 
 
-class RAMChannel(Channel):
-    '''
-    Buffers data in memory without saving it to disk.
-
-    Uses a ringbuffer algorithm designed for efficient reads (writes are not as
-    efficient, but should still be fairly quick).  The assumption is that this
-    is used for plotting data, and reads will be more common than writes (due to
-    panning, zooming and scaling).
-
-    Parameters
-    ==========
-    window
-        Number of seconds to buffer
-    '''
-
-    window = Float(10)
-    samples = Property(Int, depends_on='window, fs')
-    t0 = Property(depends_on="offset, fs")
-
-    buffer = Array
-    offset = Int(0)
-    dropped = Int(0)
-
-    partial_idx = 0
-    buffer_full = False
-
-    @cached_property
-    def _get_t0(self):
-        return self.offset/self.fs
-
-    @cached_property
-    def _get_samples(self):
-        return int(self.window * self.fs)
-
-    def _buffer_default(self):
-        return np.empty(self.samples)
-
-    def _samples_changed(self):
-        self.buffer = np.empty(self.samples)
-        self.offset = 0
-        self.dropped = 0
-        self.partial_idx = 0
-        self._write = self._partial_write
-
-    def _partial_write(self, data):
-        size = data.shape[-1]
-        if size > self.samples:
-            # If we have too much data to write to the buffer, drop the extra
-            # samples.  Offset should be incremented by the number of samples
-            # dropped.  Furthermore, we now have a "full" buffer so we switch to
-            # the _full_write method from now on.
-            self.buffer = data[..., -self.samples:]
-            self.dropped = size-self.samples
-            self.offset = size-self.samples
-            # Switch to the full write mode
-            del self.partial_idx
-            self.buffer_full = True
-            self._write = self._full_write
-        elif self.partial_idx+size > self.samples:
-            # If the number of samples available is greater than the remaining
-            # slots in the buffer, write what we can to the buffer and then
-            # switch to _full_write for the remaining samples.
-            overflow_size = (self.partial_idx+size)-self.samples
-            initial_size = size-overflow_size
-            self.buffer[..., self.partial_idx:] = data[..., :initial_size]
-            # Switch to the full write mode
-            del self.partial_idx
-            self.buffer_full = True
-            self._write = self._full_write
-            # Write the remaining samples to the buffer
-            self._write(data[..., -overflow_size:])
-        else:
-            self.buffer[..., self.partial_idx:self.partial_idx+size] = data
-            self.partial_idx += size
-
-    def _full_write(self, data):
-        size = data.shape[-1]
-        if size == 0:
-            return
-        elif size > self.samples:
-            self.buffer = data[..., -self.samples:]
-            self.dropped += size-self.samples
-            self.offset += size-self.samples
-        else:
-            # Shift elements at end of buffer to beginning so we can write new
-            # data.  Old data at beginning is discarded.  If old data is
-            # discarded, we update offset.
-            remainder = self.samples-size
-            if remainder:
-                self.buffer[..., :remainder] = self.buffer[..., -remainder:]
-                self.offset += size
-            # Write new data to end of buffer
-            self.buffer[..., -size:] = data
-
-    _write = _partial_write
-
-    def get_size(self):
-        if self.buffer_full:
-            return self.samples
-        else:
-            return self.partial_idx
-
-
 class MultiChannel(Channel):
 
     # Default to 0 to make it clear that the class has not been properly
@@ -756,7 +762,11 @@ class ProcessedFileMultiChannel(FileMixin, ProcessedMultiChannel):
     pass
 
 
-class RAMMultiChannel(RAMChannel, MultiChannel):
+class MemoryChannel(MemoryMixin, Channel):
+    pass
+
+
+class MemoryMultiChannel(MemoryMixin, MultiChannel):
 
     def _buffer_default(self):
         return np.empty((self.channels, self.samples))
@@ -777,9 +787,51 @@ class FileMultiChannel(FileMixin, MultiChannel):
         return (self.channels, 0)
 
 
-class FileSnippetChannel(FileChannel):
+class EpochChannel(Channel):
 
-    snippet_size = Int
+    epoch_size = Int
+    timestamps = Any
+
+    def _timestamps_default(self):
+        atom = tables.Atom.from_dtype(np.dtype('int32'))
+        rows = int(self.fs*self.expected_duration)
+        earray = self.node._v_file.createEArray(self.node._v_pathname, self.name
+                                                + '_ts', atom, (0,),
+                                                expectedrows=rows)
+        return earray
+
+    def _get_shape(self):
+        return (0, self.epoch_size)
+
+    def send(self, data, timestamp=np.nan):
+        data.shape = (-1, self.epoch_size)
+        self.send_all(data, [timestamp])
+
+    def send_all(self, data, timestamps=None):
+        epochs = len(data)
+        self._buffer.append(data)
+        if timestamps is None:
+            timestamps = [np.nan]*epochs
+        self.timestamps.append(timestamps)
+        self.added = data, timestamps
+
+    def get_waveforms(self, reject_threshold=None):
+        if len(self._buffer) == 0:
+            return np.array([]).reshape((-1, self.epoch_size))
+        result = self._buffer[:]
+        if reject_threshold is not None:
+            result = result[result.max(axis=0) < reject_threshold]
+        return result
+
+    def get_average(self, reject_threshold=None):
+        result = self.get_waveforms(reject_threshold)
+        return result.mean(axis=0)
+
+    def get_n(self, reject_threshold=None):
+        return len(self.get_waveforms(reject_threshold))
+
+class SpikeChannel(EpochChannel):
+
     classifiers = Any
     timestamps = Any
     unique_classifiers = Set
@@ -804,21 +856,32 @@ class FileSnippetChannel(FileChannel):
         return earray
 
     def _get_shape(self):
-        return (0, self.snippet_size)
+        return (0, self.epoch_size)
 
-    def send(self, data, timestamps, classifiers):
-        if len(data):
-            data.shape = (-1, self.snippet_size)
-            self._buffer.append(data)
-            self.classifiers.append(classifiers)
-            self.timestamps.append(timestamps)
-            self.unique_classifiers.update(set(classifiers))
-            self.added = data, timestamps, classifiers
+    def send(self, data, timestamp=np.nan, classifier=np.nan):
+        data.shape = (-1, self.epoch_size)
+        self.send_all(data, [timestamp], [classifier])
 
-    def get_recent(self, history=1, classifier=None):
+    def send_all(self, data, timestamps=None, classifiers=None):
+        epochs = len(data)
+        self._buffer.append(data)
+        if timestamps is None:
+            timestamps = [np.nan]*epochs
+        self.timestamps.append(timestamps)
+        if classifiers is None:
+            classifiers = [np.nan]*epochs
+        self.classifiers.append(classifiers)
+        self.unique_classifiers.update(set(classifiers))
+        self.added = data, timestamps, classifiers
+
+    def get_recent(self, history=None):
         if len(self._buffer) == 0:
-            return np.array([]).reshape((-1, self.snippet_size))
-        spikes = self._buffer[-history:]
+            return np.array([]).reshape((-1, self.epoch_size))
+        if history is not None:
+            result = self._buffer[-history:]
+        else:
+            result = self._buffer[:]
+
         if classifier is not None:
             classifiers = self.classifiers[-history:]
             mask = classifiers[:] == classifier
@@ -827,6 +890,21 @@ class FileSnippetChannel(FileChannel):
 
     def get_recent_average(self, count=1, classifier=None):
         return self.get_recent(count, classifier).mean(0)
+
+    def get_average(self, reject_threshold=None):
+        if len(self._buffer) == 0:
+            return np.array([]).reshape((-1, self.epoch_size))
+        result = self._buffer[:]
+        if reject_threshold is not None:
+            result = result[result.max(axis=0) < reject_threshold]
+        return result.mean(axis=0)
+
+
+class FileEpochChannel(FileMixin, EpochChannel):
+
+    def _get_shape(self):
+        return (0, self.epoch_size)
+
 
 
 if __name__ == '__main__':
