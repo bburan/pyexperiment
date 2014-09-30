@@ -824,11 +824,24 @@ class EpochChannel(Channel):
         return result
 
     def get_average(self, reject_threshold=None):
-        result = self.get_waveforms(reject_threshold)
-        return result.mean(axis=0)
+        return self.get_waveforms(reject_threshold).mean(axis=0)
 
     def get_n(self, reject_threshold=None):
         return len(self.get_waveforms(reject_threshold))
+
+    def get_fftfreq(self):
+        return np.fft.rfftfreq(self.epoch_size, 1/self.fs)
+
+    def get_psd(self, reject_threshold=None):
+        waveforms = self.get_waveforms(reject_threshold)
+        epochs, samples = waveforms.shape
+        waveforms = signal.detrend(waveforms, type='constant', axis=1)
+        csd = np.fft.rfft(waveforms, samples, axis=1)
+        return np.abs(csd)**2
+
+    def get_average_psd(self, reject_threshold=None):
+        return self.get_psd(reject_threshold).mean(axis=0)
+
 
 class SpikeChannel(EpochChannel):
 
