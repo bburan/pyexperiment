@@ -2,13 +2,14 @@ from chaco.api import BaseXYPlot
 from enable.api import black_color_trait, LineStyle
 from traits.api import Event, Float, Instance
 
+
 class BaseChannelPlot(BaseXYPlot):
     '''
     Not meant for use as a stand-alone plot.  Provides the base properties and
     methods shared by all subclasses.
     '''
 
-    source                  = Instance('cns.channel.Channel')
+    source                  = Instance('experiment.channel.Channel')
 
     fill_color              = black_color_trait
     line_color              = black_color_trait
