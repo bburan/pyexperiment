@@ -1,6 +1,7 @@
 from __future__ import division
 
-from traits.api import Bool, on_trait_change
+import numpy as np
+from traits.api import Bool, Float
 
 import logging
 log = logging.getLogger(__name__)
@@ -19,6 +20,9 @@ class FFTChannelPlot(BaseChannelPlot):
     _freq_screen_cache_valid = Bool(False)
     _psd_screen_cache_valid = Bool(False)
 
+    db = Bool(True)
+    reference = Float(1)
+
     def _index_mapper_updated(self):
         self._freq_screen_cache_valid = False
         self.invalidate_and_redraw()
@@ -29,23 +33,25 @@ class FFTChannelPlot(BaseChannelPlot):
 
     def _data_changed(self):
         self._freq_cache_valid = False
-        self._freq_screen_cache_valid = False
         self._psd_cache_valid = False
-        self._psd_screen_cache_valid = False
         self.invalidate_and_redraw()
 
     def _data_added(self):
         self._psd_cache_valid = False
-        self._psd_screen_cache_valid = False
         self.invalidate_and_redraw()
 
     def _get_screen_points(self):
         if not self._freq_cache_valid:
             self._freq_cache = self.source.get_fftfreq()
             self._freq_cache_valid = True
+            self._freq_screen_cache_valid = False
         if not self._psd_cache_valid:
-            self._psd_cache = self.source.get_average_psd()
+            psd = self.source.get_average_psd()
+            if self.db:
+                psd = 20*np.log10(psd/self.reference)
+            self._psd_cache = psd
             self._psd_cache_valid = True
+            self._psd_screen_cache_valid = False
 
         if not self._freq_screen_cache_valid:
             self._freq_screen_cache = \
@@ -76,7 +82,6 @@ class FFTChannelPlot(BaseChannelPlot):
             gc.stroke_path()
             self._draw_default_axes(gc)
 
-    @on_trait_change('_screen_cache_valid')
-    def _update_screen_cache(self):
+    def __screen_cache_valid_changed(self):
         self._freq_screen_cache_valid = False
         self._psd_screen_cache_valid = False
