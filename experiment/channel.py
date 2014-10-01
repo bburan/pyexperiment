@@ -820,7 +820,7 @@ class EpochChannel(Channel):
             return np.array([]).reshape((-1, self.epoch_size))
         result = self._buffer[:]
         if reject_threshold is not None:
-            result = result[result.max(axis=0) < reject_threshold]
+            result = result[result.max(axis=-1) < reject_threshold]
         return result
 
     def get_average(self, reject_threshold=None):
