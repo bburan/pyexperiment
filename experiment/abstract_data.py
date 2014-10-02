@@ -2,17 +2,22 @@ import logging
 log = logging.getLogger(__name__)
 
 import numpy as np
-from traits.api import Any, Event, HasTraits
+from traits.api import Any, Event, HasTraits, Property, cached_property
 
 
 class AbstractData(HasTraits):
 
+    fh = Property(depends_on='store_node')
     store_node = Any
     event_log = Any
     trial_log = Any
     event_log_updated = Event
     trial_log_updated = Event
     trial_log_dtype = Any
+
+    @cached_property
+    def _get_fh(self):
+        return self.store_node._v_file
 
     def register_dtypes(self, dtypes):
         fh = self.store_node._v_file
