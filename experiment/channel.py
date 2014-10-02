@@ -789,8 +789,13 @@ class FileMultiChannel(FileMixin, MultiChannel):
 
 class EpochChannel(Channel):
 
-    epoch_size = Int
+    epoch_duration = Float
+    epoch_size = Property(Int, depends_on='fs, epoch_duration')
     timestamps = Any
+
+    @cached_property
+    def _get_epoch_size(self):
+        return int(self.epoch_duration*self.fs)
 
     def _timestamps_default(self):
         atom = tables.Atom.from_dtype(np.dtype('int32'))
