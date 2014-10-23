@@ -51,6 +51,8 @@ from functools import wraps
 import doctest
 import unittest
 
+import numpy as np
+
 
 def check_sequence(f):
     '''
@@ -68,7 +70,7 @@ def check_sequence(f):
 
 
 @check_sequence
-def ascending(sequence):
+def ascending(sequence, cycles=np.inf):
     '''
     Returns elements from the sequence in ascending order.  When the last
     element is reached, loop around to the beginning.
@@ -82,13 +84,15 @@ def ascending(sequence):
     3
     '''
     sequence.sort()
-    while True:
+    c = 0
+    while c < cycles:
         for i in range(len(sequence)):
             yield sequence[i]
+        c += 1
 
 
 @check_sequence
-def descending(sequence):
+def descending(sequence, cycles=np.inf):
     '''
     Returns elements from the sequence in descending order.  When the last
     element is reached, loop around to the beginning.
@@ -102,9 +106,11 @@ def descending(sequence):
     8
     '''
     sequence.sort(reverse=True)
-    while True:
+    c = 0
+    while c < cycles:
         for i in range(len(sequence)):
             yield sequence[i]
+        c += 1
 
 
 @check_sequence
@@ -124,7 +130,7 @@ def pseudorandom(sequence, seed=None):
 
 
 @check_sequence
-def exact_order(sequence):
+def exact_order(sequence, cycles=np.inf):
     '''
     Returns elements in the exact order they are provided.
 
@@ -136,28 +142,31 @@ def exact_order(sequence):
     >>> choice.next()
     8
     '''
-    while True:
+    c = 0
+    while c < cycles:
         for i in range(len(sequence)):
             yield sequence[i]
+        c += 1
 
 
 @check_sequence
-def shuffled_set(sequence):
+def shuffled_set(sequence, cycles=np.inf):
     '''
     Returns a randomly selected element from the sequence and removes it from
     the sequence.  Once the sequence is exhausted, repopulate list with the
     original sequence.
     '''
-    import numpy as np
-    while True:
+    c = 0
+    while c < cycles:
         indices = range(len(sequence))
         np.random.shuffle(indices) # Shuffle is in-place
         for i in indices:
             yield sequence[i]
+        c += 1
 
 
 @check_sequence
-def counterbalanced(sequence, n):
+def counterbalanced(sequence, n, cycles=np.inf):
     '''
     Ensures that each value in `sequence` is presented an equal number of times
     over `n` trials.  At the end of the set, will regenerate a new list.  If you
@@ -179,9 +188,9 @@ def counterbalanced(sequence, n):
     5
 
     '''
-    import numpy as np
     sequence = np.asanyarray(sequence)
-    while True:
+    c = 0
+    while c < cycles:
         full_sequence = np.empty(n, dtype=sequence.dtype)
         sub_sequences = np.array_split(full_sequence, len(sequence))
         for s, value in zip(sub_sequences, sequence):
@@ -189,6 +198,7 @@ def counterbalanced(sequence, n):
         np.random.shuffle(full_sequence)
         for s in full_sequence:
             yield s
+        c += 1
 
 
 options = { 'ascending':        ascending,
@@ -214,6 +224,27 @@ class TestChoice(unittest.TestCase):
         self.assertEqual(set(seq), set(self.seq))
         seq = self.get_seq(self.seq, shuffled_set, 2)
 
+    def test_cycles(self):
+        basic_selectors = (ascending, descending, exact_order, shuffled_set)
+        for selector in basic_selectors:
+            # Ensure that we get a StopIteration error
+            choice = selector(self.seq, cycles=1)
+            for i in range(len(self.seq)):
+                choice.next()
+            self.assertRaises(StopIteration, choice.next)
+
+            # Ensure we don't get an error at all
+            choice = selector(self.seq, cycles=np.inf)
+            for i in range(len(self.seq)):
+                choice.next()
+            choice.next()
+
+            # Ensure we don't get an error at all
+            choice = selector(self.seq, cycles=2)
+            for j in range(2):
+                for i in range(len(self.seq)):
+                    choice.next()
+            self.assertRaises(StopIteration, choice.next)
 
 if __name__ == '__main__':
     doctest.testmod()
