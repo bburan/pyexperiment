@@ -66,8 +66,9 @@ class FFTChannelPlot(BaseChannelPlot):
         return self._freq_screen_cache, self._psd_screen_cache
 
     def _draw_plot(self, gc, view_bounds=None, mode="normal"):
-        points = self._get_screen_points()
-        self._render(gc, points)
+        if self.source is not None:
+            points = self._get_screen_points()
+            self._render(gc, points)
 
     def _render(self, gc, points):
         if len(points[0]) == 0:
