@@ -1,22 +1,18 @@
 import numpy as np
 
-from traits.api import (Property, Int, cached_property, Instance, Float,
-                        on_trait_change)
+from traits.api import (Property, Int, cached_property, Float)
 
 from .base_channel_plot import BaseChannelPlot
 
 
 class EpochChannelPlot(BaseChannelPlot):
 
-    source = Instance('experiment.channel.Channel')
-
     index_data = Property(depends_on='source.fs, source.snippet_size')
-    index_screen = Property(depends_on='index_data')
-    value_data = Property(depends_on='reject_threshold, '
-                          'source.added, source.updated')
+    value_data = Property(depends_on='reject_threshold, source.added, '
+                          'source.updated')
 
     reject_threshold = Float(np.inf)
-    update_rate = Int(5)
+    update_rate = Int(40)
     update_counter = Int(0)
 
     def _index_mapper_updated(self):
@@ -31,6 +27,9 @@ class EpochChannelPlot(BaseChannelPlot):
         return self.source.get_average()
 
     def _draw_plot(self, gc, view_bounds=None, mode="normal"):
+        if self.source is None:
+            self._draw_default_axes(gc)
+            return
         if not self._screen_cache_valid:
             s_index = self.index_mapper.map_screen(self.index_data)
             s_value = self.value_mapper.map_screen(self.value_data)
@@ -53,9 +52,11 @@ class EpochChannelPlot(BaseChannelPlot):
             self._draw_default_axes(gc)
 
     def _data_changed(self, event_data):
+        self._screen_cache_valid = False
         self.invalidate_and_redraw()
 
     def _data_added(self, event_data):
+        self._screen_cache_valid = False
         self.update_counter += 1
         if (self.update_counter % self.update_rate) == 0:
             self.invalidate_and_redraw()

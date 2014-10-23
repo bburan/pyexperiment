@@ -6,14 +6,15 @@ from traits.api import Float, List, Instance, Enum, on_trait_change
 import logging
 log = logging.getLogger(__name__)
 
+
 class ChannelDataRange(DataRange1D):
 
-    sources         = List(Instance('cns.channel.Channel'))
-    span            = Float(20)
-    trig_delay      = Float(5)
-    trigger         = Float(0)
-    update_mode     = Enum('auto', 'auto full', 'triggered')
-    scroll_period   = Float(20)
+    sources = List(Instance('experiment.channel.Channel'))
+    span = Float(20)
+    trig_delay = Float(5)
+    trigger = Float(0)
+    update_mode = Enum('auto', 'auto full', 'triggered')
+    scroll_period = Float(20)
 
     def _trigger_changed(self):
         self.refresh()
@@ -23,12 +24,12 @@ class ChannelDataRange(DataRange1D):
 
     def _trig_delay_changed(self):
         self.refresh()
-        
+
     def _update_mode_changed(self):
         self.refresh()
 
     def get_max_time(self):
-        bounds = [s.get_bounds()[1] for s in self.sources if s.get_size()>0]
+        bounds = [s.get_bounds()[1] for s in self.sources if s.get_size() > 0]
         return 0 if len(bounds) == 0 else max(bounds)
 
     @on_trait_change('sources.added')

@@ -11,7 +11,7 @@ class EpochPlot(ChannelPlot):
     plotted.
     '''
 
-    source              = Instance('cns.channel.Epoch')
+    source              = Instance('experiment.channel.Epoch')
     marker              = MarkerTrait
     marker_size         = Float(4.0)
     marker_color        = black_color_trait
@@ -40,7 +40,7 @@ class EpochPlot(ChannelPlot):
 
             gc.set_fill_color(self.marker_color_)
             gc.set_stroke_color(self.marker_edge_color_)
-            gc.set_line_width(self.marker_edge_width) 
+            gc.set_line_width(self.marker_edge_width)
             gc.set_line_join(0) # Curved
 
             starts = points[:,(0,2)]
