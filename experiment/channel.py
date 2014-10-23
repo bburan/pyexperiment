@@ -135,7 +135,8 @@ class FileMixin(HasTraits):
                                  complib=self.compression_type,
                                  fletcher32=self.use_checksum,
                                  shuffle=self.use_shuffle)
-        rows = int(self.fs*self.expected_duration)
+        #rows = int(self.fs*self.expected_duration)
+        rows = 512
         earray = self.node._v_file.createEArray(self.node._v_pathname,
                                                 self.name, atom,
                                                 self._get_shape(),
@@ -787,11 +788,58 @@ class FileMultiChannel(FileMixin, MultiChannel):
         return (self.channels, 0)
 
 
+class FilterMixin(HasTraits):
+
+    filter_freq_lp = Float(6e3, filter=True, attr=True)
+    filter_freq_hp = Float(300, filter=True, attr=True)
+    filter_btype = Enum('highpass', 'bandpass', 'lowpass', None, filter=True,
+                        attr=True)
+    filter_order = Float(8.0, filter=True, attr=True)
+    filter_type = Enum('butter', 'ellip', 'cheby1', 'cheby2', 'bessel',
+                       filter=True, attr=True)
+
+    filter_instable = Property(depends_on='filter_coefficients', transient=True)
+    filter_coefficients = Property(depends_on='+filter, fs', transient=True)
+    _padding = Property(depends_on='filter_order', transient=True)
+
+    @cached_property
+    def _get__padding(self):
+        return 3*self.filter_order
+
+    @cached_property
+    def _get_filter_instable(self):
+        b, a = self.filter_coefficients
+        return not np.all(np.abs(np.roots(a)) < 1)
+
+    @cached_property
+    def _get_filter_coefficients(self):
+        if self.fs == 0:
+            return
+        if self.filter_btype is None:
+            return [], []
+        if self.filter_btype == 'bandpass':
+            Wp = np.array([self.filter_freq_hp, self.filter_freq_lp])
+        elif self.filter_btype == 'highpass':
+            Wp = self.filter_freq_hp
+        else:
+            Wp = self.filter_freq_lp
+        Wp = Wp/(0.5*self.fs)
+        self.changed = True
+        return signal.iirfilter(self.filter_order, Wp, 60, 2,
+                                ftype=self.filter_type,
+                                btype=self.filter_btype,
+                                output='ba')
+
+
 class EpochChannel(Channel):
 
-    epoch_duration = Float
-    epoch_size = Property(Int, depends_on='fs, epoch_duration')
+    epoch_duration = Float(attr=True)
+    epoch_size = Property(Int, depends_on='fs, epoch_duration', transient=True)
+    time = Property(depends_on='epoch_size, t0', transient=True)
     timestamps = Any
+
+    def _get_time(self):
+        return np.arange(self.epoch_size)/self.fs + self.t0
 
     @cached_property
     def _get_epoch_size(self):
@@ -819,6 +867,7 @@ class EpochChannel(Channel):
             timestamps = [np.nan]*epochs
         self.timestamps.append(timestamps)
         self.added = data, timestamps
+        self._buffer.flush()
 
     def get_waveforms(self, reject_threshold=None):
         if len(self._buffer) == 0:
@@ -837,15 +886,27 @@ class EpochChannel(Channel):
     def get_fftfreq(self):
         return np.fft.rfftfreq(self.epoch_size, 1/self.fs)
 
-    def get_psd(self, reject_threshold=None):
+    def get_psd(self, reject_threshold=None, waveform_averages=None):
         waveforms = self.get_waveforms(reject_threshold)
         epochs, samples = waveforms.shape
+        if waveform_averages is not None:
+            new_shape = [waveform_averages, -1, samples]
+            waveforms = waveforms.reshape(new_shape).mean(axis=0)
         waveforms = signal.detrend(waveforms, type='constant', axis=1)
         csd = np.fft.rfft(waveforms, samples, axis=1)
         return np.abs(csd)**2
 
-    def get_average_psd(self, reject_threshold=None):
-        return self.get_psd(reject_threshold).mean(axis=0)
+    def get_average_psd(self, reject_threshold=None, waveform_averages=None):
+        return self.get_psd(reject_threshold, waveform_averages).mean(axis=0)
+
+
+class FilteredEpochChannel(FilterMixin, EpochChannel):
+
+    def get_waveforms(self, *args, **kw):
+        result = super(FilteredEpochChannel, self).get_waveforms(*args, **kw)
+        result = signal.detrend(result, type='linear')
+        b, a = self.filter_coefficients
+        return signal.filtfilt(b, a, result)
 
 
 class SpikeChannel(EpochChannel):
@@ -923,6 +984,11 @@ class FileEpochChannel(FileMixin, EpochChannel):
     def _get_shape(self):
         return (0, self.epoch_size)
 
+
+class FileFilteredEpochChannel(FileMixin, FilteredEpochChannel):
+
+    def _get_shape(self):
+        return (0, self.epoch_size)
 
 
 if __name__ == '__main__':
