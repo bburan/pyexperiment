@@ -896,8 +896,10 @@ class EpochChannel(Channel):
         csd = np.fft.rfft(waveforms, samples, axis=1)
         return np.abs(csd)**2
 
-    def get_average_psd(self, reject_threshold=None, waveform_averages=None):
-        return self.get_psd(reject_threshold, waveform_averages).mean(axis=0)
+    def get_average_psd(self, reject_threshold=None, waveform_averages=None,
+                        vrms=False):
+        apsd = self.get_psd(reject_threshold, waveform_averages).mean(axis=0)
+        return apsd/np.sqrt(2) if vrms else apsd
 
 
 class FilteredEpochChannel(FilterMixin, EpochChannel):
