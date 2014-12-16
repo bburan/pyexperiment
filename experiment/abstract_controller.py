@@ -318,7 +318,11 @@ class ApplyRevertControllerMixin(HasTraits):
         self.model.data.log_trial(**kwargs)
 
     def get_dtypes(self):
-        raise NotImplementedError
+        '''
+        Return list of dtypes that may be added manually in the controller code.
+        This is in addition to the dtypes auto-discovered on the paradigm.
+        '''
+        return []
 
     def register_dtypes(self):
         dtypes = self.model.paradigm.get_dtypes()
@@ -430,13 +434,16 @@ class AbstractController(ApplyRevertControllerMixin, Controller):
         At a bare minimum this function should call `self.register_dtypes` to
         ensure that the trial_log table is properly initialized with the
         correct type for each column.
+
+        Often you may need to override this method initialize hardware.
         '''
-        raise NotImplementedError
         self.register_dtypes()
         self.state = 'initialized'
 
     def start_experiment(self, info=None):
-        raise NotImplementedError
+        '''
+        Can be as simple as calling `self.next_trial`.
+        '''
         self.next_trial()
 
     def stop_experiment(self, info=None):
