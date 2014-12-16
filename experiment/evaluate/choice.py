@@ -3,10 +3,11 @@ Each generator takes a sequence and returns a single element on each call.  The
 order of the elements returned depends on the algorithm.  The generators do not
 modify the sequence.
 
-* When adding a generator you can use the check_sequence decorator to ensure
+* When adding a generator, use the check_sequence decorator to ensure
   that the sequence passed is a shallow copy that you can modify in-place
   without any side effects.
-* All generators must be infinite (i.e. they never end).
+* All generators must be infinite (i.e. they never end) or raise a StopIteration
+  error when the sequence is exhausted.
 * Random sequences have a hard dependency on Numpy (the built-in Python random
   module is suboptimal for scientific work).
 * If your sequence contains mutable objects, then any modifications to the
