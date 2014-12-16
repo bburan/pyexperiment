@@ -46,6 +46,7 @@ class AbstractData(HasTraits):
         record = record.astype(self.trial_log_description)
         self.trial_log.append(record)
         self.trial_log_updated = record
+        return len(self.trial_log)
 
     def save(self, **kwargs):
         for name, value in kwargs.items():
