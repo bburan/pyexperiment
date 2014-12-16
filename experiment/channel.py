@@ -8,6 +8,7 @@ temporary array.  However, if you wish to have an in-memory datastore, you can
 define a MemoryMixin class (see :class:`FileMixin`) that implements a
 __getitem__ method.
 '''
+from __future__ import division
 
 from traits.api import HasTraits, Property, Array, Int, Event, \
     Instance, on_trait_change, Bool, Any, String, Float, cached_property, \
@@ -90,13 +91,32 @@ class FileMixin(HasTraits):
     # experiment, which we seem to have settled on as the "standard" for running
     # appetitive experiments.
     expected_duration = Float(1800, transient=True)
-    signal = Property
 
     # The actual source where the data is stored.  Node is the HDF5 Group that
     # the EArray is stored under while name is the name of the EArray.
     node = Instance(tables.group.Group, transient=True)
-    name = String('FileChannel', transient=True)
+    name = String(transient=True)
+    overwrite = Bool(False, transient=True)
     _buffer = Instance(tables.array.Array, transient=True)
+
+    shape = Property(depends_on='added, changed', cached=True)
+
+    def _get_shape(self):
+        return self._buffer.shape
+
+    def _create_buffer(self, name, dtype, shape, expectedrows):
+        log.debug('%s: creating buffer with shape %r', self, self._get_initial_shape())
+        atom = tables.Atom.from_dtype(np.dtype(dtype))
+        log.debug('%s: creating buffer with type %r', self, dtype)
+        filters = tables.Filters(complevel=self.compression_level,
+                                 complib=self.compression_type,
+                                 fletcher32=self.use_checksum,
+                                 shuffle=self.use_shuffle)
+        if name in self.node and self.overwrite:
+            self.node._f_get_child(name)._f_remove()
+        return self.node._v_file.createEArray(self.node._v_pathname, name, atom,
+                                              shape, filters=filters,
+                                              expectedrows=expectedrows)
 
     @classmethod
     def from_node(cls, node, **kwargs):
@@ -124,24 +144,12 @@ class FileMixin(HasTraits):
         kwargs['dtype'] = node.dtype
         return cls(**kwargs)
 
-    def _get_shape(self):
+    def _get_initial_shape(self):
         return (0,)
 
     def __buffer_default(self):
-        log.debug('%s: creating buffer with shape %r', self, self._get_shape())
-        atom = tables.Atom.from_dtype(np.dtype(self.dtype))
-        log.debug('%s: creating buffer with type %r', self, self.dtype)
-        filters = tables.Filters(complevel=self.compression_level,
-                                 complib=self.compression_type,
-                                 fletcher32=self.use_checksum,
-                                 shuffle=self.use_shuffle)
-        #rows = int(self.fs*self.expected_duration)
-        rows = 512
-        earray = self.node._v_file.createEArray(self.node._v_pathname,
-                                                self.name, atom,
-                                                self._get_shape(),
-                                                filters=filters,
-                                                expectedrows=rows)
+        earray = self._create_buffer(self.name, self.dtype, self._get_initial_shape(),
+                                     int(self.fs*self.expected_duration))
         for k, v in self.trait_get(attr=True).items():
             earray._v_attrs[k] = v
         return earray
@@ -156,114 +164,26 @@ class FileMixin(HasTraits):
     def _write(self, data):
         self._buffer.append(data)
 
-    def append(self, data):
-        self._buffer.append(data)
-
     def __repr__(self):
         return '<HDF5Store {}>'.format(self.name)
 
+    def append(self, data):
+        self._buffer.append(data)
 
-class MemoryMixin(HasTraits):
+    def clear(self):
+        self._buffer.truncate(0)
+
+
+class NDArrayMixin(HasTraits):
     '''
-    Buffers data in memory without saving it to disk.
-
-    Uses a ringbuffer algorithm designed for efficient reads (writes are not as
-    efficient, but should still be fairly quick).  The assumption is that this
-    is used for plotting data, and reads will be more common than writes (due to
-    panning, zooming and scaling).
-
-    Parameters
-    ==========
-    window
-        Number of seconds to buffer
+    Mixin class that uses numpy arrays as the backend for the buffer.
     '''
 
-    window = Float(10)
-    samples = Property(Int, depends_on='window, fs')
-    t0 = Property(depends_on="offset, fs")
-
-    buffer = Array
-    offset = Int(0)
-    dropped = Int(0)
-
-    partial_idx = 0
-    buffer_full = False
-
-    @cached_property
-    def _get_t0(self):
-        return self.offset/self.fs
-
-    @cached_property
-    def _get_samples(self):
-        return int(self.window * self.fs)
-
-    def _buffer_default(self):
-        return np.empty(self.samples)
-
-    def _samples_changed(self):
-        self.buffer = np.empty(self.samples)
-        self.offset = 0
-        self.dropped = 0
-        self.partial_idx = 0
-        self._write = self._partial_write
-
-    def _partial_write(self, data):
-        size = data.shape[-1]
-        if size > self.samples:
-            # If we have too much data to write to the buffer, drop the extra
-            # samples.  Offset should be incremented by the number of samples
-            # dropped.  Furthermore, we now have a "full" buffer so we switch to
-            # the _full_write method from now on.
-            self.buffer = data[..., -self.samples:]
-            self.dropped = size-self.samples
-            self.offset = size-self.samples
-            # Switch to the full write mode
-            del self.partial_idx
-            self.buffer_full = True
-            self._write = self._full_write
-        elif self.partial_idx+size > self.samples:
-            # If the number of samples available is greater than the remaining
-            # slots in the buffer, write what we can to the buffer and then
-            # switch to _full_write for the remaining samples.
-            overflow_size = (self.partial_idx+size)-self.samples
-            initial_size = size-overflow_size
-            self.buffer[..., self.partial_idx:] = data[..., :initial_size]
-            # Switch to the full write mode
-            del self.partial_idx
-            self.buffer_full = True
-            self._write = self._full_write
-            # Write the remaining samples to the buffer
-            self._write(data[..., -overflow_size:])
-        else:
-            self.buffer[..., self.partial_idx:self.partial_idx+size] = data
-            self.partial_idx += size
-
-    def _full_write(self, data):
-        size = data.shape[-1]
-        if size == 0:
-            return
-        elif size > self.samples:
-            self.buffer = data[..., -self.samples:]
-            self.dropped += size-self.samples
-            self.offset += size-self.samples
-        else:
-            # Shift elements at end of buffer to beginning so we can write new
-            # data.  Old data at beginning is discarded.  If old data is
-            # discarded, we update offset.
-            remainder = self.samples-size
-            if remainder:
-                self.buffer[..., :remainder] = self.buffer[..., -remainder:]
-                self.offset += size
-            # Write new data to end of buffer
-            self.buffer[..., -size:] = data
-
-    _write = _partial_write
-
-    def get_size(self):
-        if self.buffer_full:
-            return self.samples
-        else:
-            return self.partial_idx
+    def __buffer_default(self):
+        initial_shape = list(self._get_initial_shape())
+        edim = shape.index(-1)
+        initial_shape[edim] = expected_rows
+        _buffer = np.empty(initial_shape, dtype=dtype)
 
 
 ################################################################################
@@ -347,7 +267,7 @@ class FileEpoch(FileMixin, Epoch):
     name = 'FileEpoch'
     dtype = Any(np.int32)
 
-    def _get_shape(self):
+    def _get_initial_shape(self):
         return (0, 2)
 
 
@@ -393,10 +313,11 @@ class Channel(HasTraits):
     added = Event
     changed = Event
 
-    shape = Property
-
-    def _get_shape(self):
-        return self._buffer.shape
+    samples = Property(depends_on='shape', cached=True)
+    duration = Property(depends_on='samples, fs', cached=True)
+    latest = Property(depends_on='duration, t0', cached=True)
+    time = Property(depends_on='samples, fs, t0', cached=True)
+    signal = Property(depends_on='_buffer', cached=True)
 
     def __getitem__(self, slice):
         '''
@@ -406,6 +327,47 @@ class Channel(HasTraits):
         method.  See `ProcessedFileMultiChannel` for an example.
         '''
         return self._buffer[slice]
+
+    def _get_initial_shape(self):
+        if not self.traits_inited():
+            return
+        return self._buffer.shape
+
+    def _get_samples(self):
+        if not self.traits_inited():
+            return
+        return self.shape[-1]
+
+    def _get_duration(self):
+        if not self.traits_inited():
+            return
+        return self.samples/self.fs
+
+    def _get_latest(self):
+        if not self.traits_inited():
+            return
+        return self.duration+self.t0
+
+    def _get_time(self):
+        if not self.traits_inited():
+            return
+        return np.arange(self.samples)/self.fs + self.t0
+
+    def _get_signal(self):
+        if not self.traits_inited():
+            return
+        return self._buffer[:]
+
+    def _to_bounds(self, start, end, reference=None):
+        if start > end:
+            raise ValueError("Start time must be < end time")
+        if reference is not None:
+            ref_idx = self.to_index(reference)
+        else:
+            ref_idx = 0
+        lb = max(0, self.to_index(start)+ref_idx)
+        ub = max(0, self.to_index(end)+ref_idx)
+        return lb, ub
 
     def to_index(self, time):
         '''
@@ -422,6 +384,33 @@ class Channel(HasTraits):
         time = np.asanyarray(time)
         samples = time*self.fs
         return samples.astype('i')
+
+    def get_index(self, index, reference=0):
+        t0_index = int(self.t0*self.fs)
+        index = max(0, index-t0_index+reference)
+        return self[..., index]
+
+    def get_range(self, start, end, reference=None):
+        '''
+        Returns a subset of the range.
+
+        Parameters
+        ----------
+        start : float, sec
+            Start time.
+        end : float, sec
+            End time.
+        reference : float, optional
+            Set to -1 to get the most recent range
+        '''
+        if start is None:
+            start = self.t0
+        if end is None:
+            end = self.t0+self.duration
+
+        lb, ub = self._to_bounds(start, end, reference)
+        log.debug('%s: %d:%d requested', self, lb, ub)
+        return self[..., lb:ub]
 
     def get_range_index(self, start, end, reference=0, check_bounds=False):
         '''
@@ -455,53 +444,11 @@ class Channel(HasTraits):
         else:
             return self[..., lb:ub]
 
-    def get_index(self, index, reference=0):
-        t0_index = int(self.t0*self.fs)
-        index = max(0, index-t0_index+reference)
-        return self[..., index]
-
-    def _to_bounds(self, start, end, reference=None):
-        if start > end:
-            raise ValueError("Start time must be < end time")
-        if reference is not None:
-            ref_idx = self.to_index(reference)
-        else:
-            ref_idx = 0
-        lb = max(0, self.to_index(start)+ref_idx)
-        ub = max(0, self.to_index(end)+ref_idx)
-        return lb, ub
-
-    def get_range(self, start, end, reference=None):
-        '''
-        Returns a subset of the range.
-
-        Parameters
-        ----------
-        start : float, sec
-            Start time.
-        end : float, sec
-            End time.
-        reference : float, optional
-            Set to -1 to get the most recent range
-        '''
-        lb, ub = self._to_bounds(start, end, reference)
-        log.debug('%s: %d:%d requested', self, lb, ub)
-        return self[..., lb:ub]
-
-    def get_size(self):
-        return self._buffer.shape[-1]
-
     def get_bounds(self):
         '''
         Returns valid range of times as a tuple (lb, ub)
         '''
-        return self.t0, self.t0 + self.get_size()/self.fs
-
-    def latest(self):
-        if self.get_size() > 0:
-            return self._buffer[-1]/self.fs
-        else:
-            return self.t0
+        return self.t0, self.latest
 
     def send(self, data):
         '''
@@ -515,14 +462,14 @@ class Channel(HasTraits):
         '''
         Write data to buffer.
         '''
-        lb = self.get_size()
+        lb = self.latest
         self._write(data)
-        ub = self.get_size()
+        ub = self.latest
 
-        # Updated has the upper and lower bound of the data that was added.
-        # Some plots will use this to determine whether the updated region of
-        # the data is within the visible region.  If not, no update is made.
-        self.added = lb/self.fs, ub/self.fs
+        # Some plots monitoring this event will use this to determine whether
+        # the updated region of the data is within the visible region.  If not,
+        # no update is made.
+        self.added = lb, ub
 
     def summarize(self, timestamps, offset, duration, fun):
         if len(timestamps) == 0:
@@ -553,9 +500,37 @@ class Channel(HasTraits):
             range = self.get_range_index(lb_index, ub_index, timestamps)
             return fun(range)
 
-    @property
-    def n_samples(self):
-        return self._buffer.shape[-1]
+    def get_fftfreq(self):
+        return np.fft.rfftfreq(self.samples, 1/self.fs)
+
+    def _get_psd(self, s, rms=False):
+        csd = np.fft.rfft(s)
+        psd = 2*np.abs(csd)/self.samples
+        return psd/np.sqrt(2) if rms else psd
+
+    def get_psd(self, rms=False, window=None):
+        s = signal.detrend(self[:], type='linear', axis=-1)
+        if window is not None:
+            w = signal.get_window(window, self.samples)
+            s = w/w.mean()*s
+        return self._get_psd(s, rms)
+
+    def get_rms(self, detrend=True):
+        if detrend:
+            s = signal.detrend(self[:], type='linear', axis=-1)
+        else:
+            s = self[:]
+        return np.mean(s**2, axis=-1)**0.5
+
+    def get_magnitude(self, frequency, rms=False, window=None):
+        if window is not None:
+            w = signal.get_window(window, self.samples)
+            s = w/w.mean()*self.signal
+        else:
+            s = self.signal
+        r = 2.0*s*np.exp(-1.0j*(2.0*np.pi*self.time*frequency))
+        magnitude = np.abs(np.mean(r))
+        return magnitude/np.sqrt(2.0) if rms else magnitude
 
 
 class FileChannel(FileMixin, Channel):
@@ -563,7 +538,6 @@ class FileChannel(FileMixin, Channel):
     Uses a HDF5 datastore for the buffer
     '''
 
-    name = 'FileChannel'
     dtype = Any(np.float32)
 
 
@@ -763,28 +737,11 @@ class ProcessedFileMultiChannel(FileMixin, ProcessedMultiChannel):
     pass
 
 
-class MemoryChannel(MemoryMixin, Channel):
-    pass
-
-
-class MemoryMultiChannel(MemoryMixin, MultiChannel):
-
-    def _buffer_default(self):
-        return np.empty((self.channels, self.samples))
-
-    def _samples_changed(self):
-        self.buffer = np.empty((self.channels, self.samples))
-        self.offset = 0
-        self.dropped = 0
-        self.partial_idx = 0
-        self._write = self._partial_write
-
-
 class FileMultiChannel(FileMixin, MultiChannel):
 
     name = 'FileMultiChannel'
 
-    def _get_shape(self):
+    def _get_initial_shape(self):
         return (self.channels, 0)
 
 
@@ -835,25 +792,24 @@ class EpochChannel(Channel):
 
     epoch_duration = Float(attr=True)
     epoch_size = Property(Int, depends_on='fs, epoch_duration', transient=True)
-    time = Property(depends_on='epoch_size, t0', transient=True)
     timestamps = Any
-
-    def _get_time(self):
-        return np.arange(self.epoch_size)/self.fs + self.t0
 
     @cached_property
     def _get_epoch_size(self):
         return int(self.epoch_duration*self.fs)
 
     def _timestamps_default(self):
+        # TODO - need to make this a mixin
         atom = tables.Atom.from_dtype(np.dtype('int32'))
         rows = int(self.fs*self.expected_duration)
+        if self.name + '_ts' in self.node and self.overwrite:
+            self.node._f_get_child(self.name + '_ts')._f_remove()
         earray = self.node._v_file.createEArray(self.node._v_pathname, self.name
                                                 + '_ts', atom, (0,),
                                                 expectedrows=rows)
         return earray
 
-    def _get_shape(self):
+    def _get_initial_shape(self):
         return (0, self.epoch_size)
 
     def send(self, data, timestamp=np.nan):
@@ -869,7 +825,7 @@ class EpochChannel(Channel):
         self.added = data, timestamps
         self._buffer.flush()
 
-    def get_waveforms(self, reject_threshold=None):
+    def get_epochs(self, reject_threshold=None):
         if len(self._buffer) == 0:
             return np.array([]).reshape((-1, self.epoch_size))
         result = self._buffer[:]
@@ -878,28 +834,26 @@ class EpochChannel(Channel):
         return result
 
     def get_average(self, reject_threshold=None):
-        return self.get_waveforms(reject_threshold).mean(axis=0)
+        return self.get_epochs(reject_threshold).mean(axis=0)
 
     def get_n(self, reject_threshold=None):
-        return len(self.get_waveforms(reject_threshold))
+        return len(self.get_epochs(reject_threshold))
 
-    def get_fftfreq(self):
-        return np.fft.rfftfreq(self.epoch_size, 1/self.fs)
-
-    def get_psd(self, reject_threshold=None, waveform_averages=None):
-        waveforms = self.get_waveforms(reject_threshold)
-        epochs, samples = waveforms.shape
+    def get_psd(self, reject_threshold=None, waveform_averages=None, rms=False,
+                window=None):
+        s = self.get_epochs(reject_threshold)
         if waveform_averages is not None:
-            new_shape = [waveform_averages, -1, samples]
-            waveforms = waveforms.reshape(new_shape).mean(axis=0)
-        waveforms = signal.detrend(waveforms, type='constant', axis=1)
-        csd = np.fft.rfft(waveforms, samples, axis=1)
-        return np.abs(csd)**2
+            new_shape = [waveform_averages, -1, self.samples]
+            s = s.reshape(new_shape).mean(axis=0)
+        if window is not None:
+            w = signal.get_window(window, s.shape[-1])
+            s = w/w.mean()*s
+        return self._get_psd(s, rms)
 
     def get_average_psd(self, reject_threshold=None, waveform_averages=None,
-                        vrms=False):
-        apsd = self.get_psd(reject_threshold, waveform_averages).mean(axis=0)
-        return apsd/np.sqrt(2) if vrms else apsd
+                        rms=False, window=None):
+        psd = self.get_psd(reject_threshold, waveform_averages, rms, window)
+        return psd.mean(axis=0)
 
 
 class FilteredEpochChannel(FilterMixin, EpochChannel):
@@ -936,7 +890,7 @@ class SpikeChannel(EpochChannel):
                                                 expectedrows=rows)
         return earray
 
-    def _get_shape(self):
+    def _get_initial_shape(self):
         return (0, self.epoch_size)
 
     def send(self, data, timestamp=np.nan, classifier=np.nan):
@@ -984,15 +938,140 @@ class SpikeChannel(EpochChannel):
 class FileEpochChannel(FileMixin, EpochChannel):
 
     def _get_shape(self):
+        return self._buffer.shape
+
+    def _get_initial_shape(self):
         return (0, self.epoch_size)
 
 
 class FileFilteredEpochChannel(FileMixin, FilteredEpochChannel):
 
-    def _get_shape(self):
+    def _get_initial_shape(self):
         return (0, self.epoch_size)
 
 
+import unittest
+
+
+class TestEpochChannel(unittest.TestCase):
+
+    def setUp(self):
+        self.fh = tables.open_file('dummy_name', 'w', driver='H5FD_CORE',
+                                   driver_core_backing_store=0)
+
+    def tearDown(self):
+        self.fh.close()
+
+    def testEpochPSD(self):
+        t = np.arange(200e3)/200e3
+        frequency = 1000
+        for amplitude in (0.5, 1.0, 2.0, 4.0):
+            channel = FileEpochChannel(fs=200e3, epoch_duration=1,
+                                       node=self.fh.root, name='temp',
+                                       overwrite=True)
+            for i in range(2):
+                waveform = amplitude*np.sin(2*np.pi*frequency*t)
+                channel.send(waveform[np.newaxis])
+                frequencies = channel.get_fftfreq()
+                freq_ix = np.argmin(np.abs(frequencies-frequency))
+
+                # Test Vpp calculation
+                psd = channel.get_average_psd()
+                sin_vpp = psd[freq_ix]
+                self.assertAlmostEqual(sin_vpp, amplitude)
+
+                # Test Vrms calculation
+                psd = channel.get_average_psd(rms=True)
+                sin_rms = psd[freq_ix]
+                self.assertAlmostEqual(sin_rms*np.sqrt(2), amplitude)
+
+                # Test Vpp calculation using window.  A flattop window should be
+                # the most accurate in estimating frequency level.
+                psd = channel.get_average_psd(window='flattop')
+                sin_vpp = psd[freq_ix]
+                self.assertAlmostEqual(sin_vpp, amplitude, places=7)
+
+
+class TestChannel(unittest.TestCase):
+
+    def setUp(self):
+        self.fh = tables.open_file('dummy_name', 'w', driver='H5FD_CORE',
+                                   driver_core_backing_store=0)
+
+    def tearDown(self):
+        self.fh.close()
+
+    def testChannelPSD(self):
+        klass = get_channel_class('Channel', 'file')
+        frequency = 1000
+        fs = 100e3
+        for duration in (1, 1.5, 5):
+            t = np.arange(fs*duration)/fs
+            for amplitude in (0.5, 1.0, 2.0, 4.0):
+                channel = FileChannel(fs=fs, node=self.fh.root, name='temp',
+                                      overwrite=True)
+
+                waveform = amplitude*np.sin(2*np.pi*frequency*t)
+                channel.send(waveform[np.newaxis])
+                frequencies = channel.get_fftfreq()
+                freq_ix = np.argmin(np.abs(frequencies-frequency))
+
+                # Test Vpp calculation
+                psd = channel.get_psd()
+                sin_vpp = psd[freq_ix]
+                self.assertAlmostEqual(sin_vpp, amplitude, places=5)
+
+                # Test Vrms calculation
+                psd = channel.get_psd(rms=True)
+                sin_rms = psd[freq_ix]
+                self.assertAlmostEqual(sin_rms*np.sqrt(2), amplitude, places=5)
+
+                # Test single PSD calculation using DFT
+                single_psd = channel.get_magnitude(frequency)
+                self.assertAlmostEqual(single_psd, amplitude)
+                single_psd_rms = channel.get_magnitude(frequency, rms=True)
+                self.assertAlmostEqual(single_psd_rms*np.sqrt(2), amplitude)
+
+                # Ensure that we are getting the equivalent of 0 for frequencies
+                # not in the signal.
+                single_psd = channel.get_magnitude(1)
+                self.assertAlmostEqual(single_psd, 0, places=2)
+                single_psd = channel.get_magnitude(frequency*0.5)
+                self.assertAlmostEqual(single_psd, 0, places=2)
+
+                # Test Vpp calculation using window.  A flattop window should be
+                # the most accurate in estimating frequency level.
+                psd = channel.get_psd(window='flattop')
+                sin_vpp = psd[freq_ix]
+                self.assertAlmostEqual(sin_vpp, amplitude, places=7)
+
+                # Repeat the get_magnitude tests, and ensure they are more
+                # accurate than without a window.
+                sin_vpp = channel.get_magnitude(frequency, window='flattop')
+                self.assertAlmostEqual(sin_vpp, amplitude, places=7)
+                sin_vpp = channel.get_magnitude(1, window='flattop')
+                self.assertAlmostEqual(sin_vpp, 0, places=4)
+                sin_vpp = channel.get_magnitude(100, window='flattop')
+                self.assertAlmostEqual(sin_vpp, 0, places=7)
+                sin_vpp = channel.get_magnitude(10e3, window='flattop')
+                self.assertAlmostEqual(sin_vpp, 0, places=7)
+
+
+def get_channel(class_name, backend, mixins=None):
+    classes = globals()
+    channel_class = classes[class_name]
+    backend_class = classes['{}Mixin'.format(backend.capitalize())]
+    if mixins is None:
+        mixins = []
+    elif isinstance(mixins, basestring):
+        mixins = [mixins]
+    mixin_classes = [classes['{}Mixin'.format(m.capitalize())] for m in mixins]
+    bases = [backend_class] + mixin_classes + [channel_class]
+    name = backend.capitalize() + \
+        ''.join(m.capitalize() for m in mixins) + \
+        class_name
+    return type(name, tuple(bases), {})
+
+
 if __name__ == '__main__':
-    import doctest
-    doctest.testmod()
+    unittest.main()
