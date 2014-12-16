@@ -4,6 +4,12 @@ import numpy as np
 
 
 def choice(sequence):
+    '''
+    Randomly return a single value, with replacement, from the sequence
+
+    For more sophisticated selection algorithms, see the functions provided by
+    `experiment.evaluate.choice`.
+    '''
     i = np.random.randint(0, len(sequence))
     return sequence[i]
 
@@ -38,8 +44,16 @@ def toss(x=0.5):
     return np.random.uniform() <= x
 
 
+def imult(x, y):
+    '''
+    Coerce x to be an integer multiple of y
+    '''
+    return round(x/y)*y
+
+
 options = {
     'toss':         toss,
     'h_uniform':    h_uniform,
     'choice':       choice,
+    'imult':        imult,
 }
