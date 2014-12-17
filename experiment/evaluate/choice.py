@@ -50,7 +50,6 @@ An error is also raised when an empty sequence is passed:
 
 from functools import wraps
 import doctest
-import unittest
 
 import numpy as np
 
@@ -64,10 +63,22 @@ def check_sequence(f):
     @wraps(f)
     def wrapper(sequence, *args, **kw):
         if len(sequence) == 0:
-            raise ValueError, "Cannot use an empty sequence"
+            raise ValueError("Cannot use an empty sequence")
         sequence = sequence[:]
         return f(sequence, *args, **kw)
     return wrapper
+
+
+def u(generator):
+    previous_value = None
+    result = generator.next()
+    while True:
+        print 'yielding', result
+        value = (yield result)
+        print previous_value, value
+        if previous_value != value:
+            previous_value = value
+            result = generator.next()
 
 
 @check_sequence
@@ -160,7 +171,7 @@ def shuffled_set(sequence, cycles=np.inf):
     c = 0
     while c < cycles:
         indices = range(len(sequence))
-        np.random.shuffle(indices) # Shuffle is in-place
+        np.random.shuffle(indices)  # Shuffle is in-place
         for i in indices:
             yield sequence[i]
         c += 1
@@ -202,51 +213,16 @@ def counterbalanced(sequence, n, cycles=np.inf):
         c += 1
 
 
-options = { 'ascending':        ascending,
-            'descending':       descending,
-            'pseudorandom':     pseudorandom,
-            'exact_order':      exact_order,
-            'shuffled_set':     shuffled_set,
-            'counterbalanced':  counterbalanced,
-            }
+options = {
+    'ascending':        ascending,
+    'descending':       descending,
+    'pseudorandom':     pseudorandom,
+    'exact_order':      exact_order,
+    'shuffled_set':     shuffled_set,
+    'counterbalanced':  counterbalanced,
+    'u':                u,
+}
 
-
-class TestChoice(unittest.TestCase):
-
-    def get_seq(self, sequence, selector, n=1):
-        choice = selector(sequence)
-        return [choice.next() for i in range(len(sequence)*n)]
-
-    def setUp(self):
-        self.seq = [1, 3, 8, 9, 12, 0, 4]
-
-    def test_shuffled_set(self):
-        seq = self.get_seq(self.seq, shuffled_set)
-        self.assertEqual(set(seq), set(self.seq))
-        seq = self.get_seq(self.seq, shuffled_set, 2)
-
-    def test_cycles(self):
-        basic_selectors = (ascending, descending, exact_order, shuffled_set)
-        for selector in basic_selectors:
-            # Ensure that we get a StopIteration error
-            choice = selector(self.seq, cycles=1)
-            for i in range(len(self.seq)):
-                choice.next()
-            self.assertRaises(StopIteration, choice.next)
-
-            # Ensure we don't get an error at all
-            choice = selector(self.seq, cycles=np.inf)
-            for i in range(len(self.seq)):
-                choice.next()
-            choice.next()
-
-            # Ensure we don't get an error at all
-            choice = selector(self.seq, cycles=2)
-            for j in range(2):
-                for i in range(len(self.seq)):
-                    choice.next()
-            self.assertRaises(StopIteration, choice.next)
 
 if __name__ == '__main__':
     doctest.testmod()
-    unittest.main()
