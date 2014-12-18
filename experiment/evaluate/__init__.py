@@ -3,6 +3,7 @@ from __future__ import division
 import logging
 log = logging.getLogger(__name__)
 
+import re
 from time import time
 import types
 
@@ -32,18 +33,24 @@ class ParameterExpression(object):
     # Include various convenience functions defined in the expressions module
     GLOBALS.update(expr.options)
 
-    def __init__(self, value, evaluate_when=None):
-        if isinstance(value, basestring):
-            self._expression = value
-            self._code = compile(self._expression, '<string>', 'eval')
-            self._co_names = self._code.co_names
-            self._dependencies = list(self._co_names) + [evaluate_when]
+    DEPENDENCY_PATTERN = re.compile(r'u\((.*), ([_A-Za-z][_A-Za-z0-9]*)\)')
 
+    def __init__(self, value):
+        self._original_expression = value
+        self._next_when = None
+        if isinstance(value, basestring):
+            match = self.DEPENDENCY_PATTERN.match(value)
+            if match is not None:
+                self._expression, self._next_when = match.groups()
+            else:
+                self._expression = value
+
+            self._code = compile(self._expression, '<string>', 'eval')
             self._cached_value = None
             self._generator = None
-
-            self._evaluate_when = evaluate_when
-
+            self._dependencies = list(self._code.co_names)
+            if self._next_when is not None:
+                self._dependencies += [self._next_when]
             try:
                 # Do a quick check to see if any syntax errors pop out.
                 # NameError is going to be a common one (especially when we are
@@ -81,23 +88,25 @@ class ParameterExpression(object):
                 self._cached_value = self._generator.next()
             return self._cached_value
 
-        value = eval(self._code, self.GLOBALS, local_context)
-        if not dry_run and isinstance(value, types.GeneratorType):
-            self._generator = value
-            self._cached_value = self._generator.next()
-        else:
-            self._cached_value = value
+        if self._code is not None:
+            value = eval(self._code, self.GLOBALS, local_context)
+            if not dry_run and isinstance(value, types.GeneratorType):
+                self._generator = value
+                self._cached_value = self._generator.next()
+            else:
+                self._cached_value = value
         return self._cached_value
 
     def reset(self):
-        self._cached_value = None
-        self._generator = None
+        if self._generator is not None:
+            self._cached_value = None
+            self._generator = None
 
     def __str__(self):
         return self._expression
 
     def __repr__(self):
-        return "{} ({})".format(self._expression, self._cache_valid)
+        return "{}".format(self._expression)
 
     # One must define both the == and != rich comparision methods for
     # on_trait_change to properly register trait changes while ignoring
@@ -128,71 +137,16 @@ class ParameterExpression(object):
             self._code = None
 
 
-def evaluate_value(parameter, expressions, context=None, dry_run=False):
-    '''
-    Given a stack of expressions and the desired parameter to evaluate,
-    evaluates all the expressions necessary to evaluate the desired parameter.
-    If an expression is evaluated, it is removed from the stack of expressions
-    and added to the context.
-    '''
-    if context is None:
-        context = {}
-
-    # If the value of the requested parameter has already been computed and
-    # stored in the context dictionary, remove it from the expression stack and
-    # return the cached value.
-    if parameter in context:
-        expressions.pop(parameter)
-        return context
-
-    # Otherwise, find the expression that is used to compute the value of the
-    # parameter.  Check to see if the parameter has any dependencies (i.e.
-    # other unevaluated parameters that need to be comptued first).  If so,
-    # iterate through those.
-    expression = expressions[parameter]
-    if isinstance(expression, ParameterExpression):
-        # Evaluate the dependencies first
-        for d in expression._dependencies:
-            if d in expressions:
-                evaluate_value(d, expressions, context)
-        # Evaluate the change_when if needed
-        next_value = True
-        d = expression._evaluate_when
-        if d is not None and d in expressions:
-            try:
-                evaluate_value(d, expressions, context)
-            except StopIteration:
-                expressions[d].reset()
-                evaluate_value(d, expressions, context)
-
-        # Now, evaluate the expression
-        context[parameter] = expression.evaluate(context, dry_run=dry_run,
-                                                 next_value=next_value)
-    else:
-        context[parameter] = expression
-
-    expressions.pop(parameter)
-    return context
-
-
-def evaluate_expressions(expressions, current_context, dry_run=False):
-    '''
-    Will raise a NameError if it is no longer able to evaluate.
-    '''
-    while expressions:
-        name = expressions.keys()[0]
-        evaluate_value(name, expressions, current_context, dry_run)
-
-
 class ExpressionNamespace(object):
 
     def __init__(self, expressions, context=None):
         self._cached_expressions = expressions
         self._catch = []
-        self._catch = [e._evaluate_when for e
-                       in self._cached_expressions.values()
-                       if isinstance(e, ParameterExpression) and
-                       e._evaluate_when is not None]
+        for e in self._cached_expressions.values():
+            if isinstance(e, ParameterExpression):
+                if e._next_when is not None:
+                    self._catch.append(e._next_when)
+                e.reset()
         self.reset_values(context)
 
     def evaluate_values(self, extra_context=None, dry_run=False):
@@ -237,8 +191,7 @@ class ExpressionNamespace(object):
         if extra_context is not None:
             context.update(extra_context)
 
-        # Evaluate the change_when if needed
-        next_value = expression._evaluate_when in self._seq_end
+        next_value = expression._next_when in self._seq_end
         try:
             value = expression.evaluate(context, dry_run, next_value)
         except StopIteration:
@@ -252,6 +205,16 @@ class ExpressionNamespace(object):
         return value
 
     def reset_values(self, context=None):
+        '''
+        Reset all expressions so that they get reevaluated on the next call
+
+        Parameters
+        ----------
+        context : {None, dict}
+            If provided, evaluated values will be stored in this dictionary.
+            This dictionary can also contain extra variables that will be
+            provided to the evaluation namespace.
+        '''
         self._expressions = self._cached_expressions.copy()
         self._context = {} if context is None else context
         self._seq_end = [None]
@@ -267,19 +230,14 @@ class Expression(TraitType):
     info_text = 'a Python value or expression'
     default_value = ParameterExpression('None')
 
-    def post_setattr(self, object, name, value):
-        if not isinstance(value, ParameterExpression):
-            value = ParameterExpression(value)
-            object.__dict__[name] = value
-
     def init(self):
         if not isinstance(self.default_value, ParameterExpression):
             self.default_value = ParameterExpression(self.default_value)
 
-    def validate(self, object, name, value):
+    def validate(self, obj, name, value):
         if isinstance(value, ParameterExpression):
             return value
         try:
             return ParameterExpression(value)
         except:
-            self.error(object, name, value)
+            self.error(obj, name, value)

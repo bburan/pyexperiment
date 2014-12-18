@@ -1,3 +1,6 @@
+import os
+os.environ['ETS_TOOLKIT'] = 'null'
+
 import logging
 log = logging.getLogger(__name__)
 
@@ -5,9 +8,9 @@ from traits.api import (HasTraits, Dict, List, Any, Bool, on_trait_change, Int,
                         Enum)
 from traitsui.api import TabularEditor, Controller
 from traitsui.tabular_adapter import TabularAdapter
-from pyface.api import confirm, YES
+from pyface.api import confirm, YES, error
 
-from .evaluate import evaluate_expressions, evaluate_value
+from .evaluate import ExpressionNamespace
 
 COLOR_NAMES = {
     'light green': '#98FB98',
@@ -18,6 +21,7 @@ COLOR_NAMES = {
     'light blue': '#ADD8E6',
     'white': '#FFFFFF',
     }
+
 
 class ContextAdapter(TabularAdapter):
 
@@ -38,6 +42,7 @@ class ContextAdapter(TabularAdapter):
 
 
 context_editor = TabularEditor(adapter=ContextAdapter(), editable=False)
+
 
 class ApplyRevertControllerMixin(HasTraits):
     '''
@@ -117,7 +122,7 @@ class ApplyRevertControllerMixin(HasTraits):
         self.old_context = self.current_context.copy()
         self.current_context = self.trait_get(context=True)
         self.current_context.update(self.model.data.trait_get(context=True))
-        self.pending_expressions = self.shadow_paradigm.trait_get(context=True)
+        self.namespace.reset_values(self.current_context)
         if extra_context is not None:
             for k, v in extra_context.items():
                 self.set_current_value(k, v)
@@ -138,14 +143,16 @@ class ApplyRevertControllerMixin(HasTraits):
             # causes an error.
             pending_expressions = self.model.paradigm.trait_get(context=True)
             current_context = self.model.data.trait_get(context=True)
-            evaluate_expressions(pending_expressions, current_context,
-                                 dry_run=True)
+
+            ns = ExpressionNamespace(pending_expressions, current_context)
+            ns.evaluate_values(dry_run=True)
 
             # If we've made it this far, then let's go ahead and copy the
             # changes over to our shadow_paradigm.  We'll apply the requested
             # changes immediately if a trial is not currently running.
             self.shadow_paradigm.copy_traits(self.model.paradigm)
             self.pending_changes = False
+            self.namespace = ns
 
             # Subclasses need to define this function (e.g.
             # abstract_positive_controller and abstract_aversive_controller)
@@ -194,12 +201,7 @@ class ApplyRevertControllerMixin(HasTraits):
         pending_expressions stack.  Additional context variables may be
         evaluated as needed.
         '''
-        try:
-            return self.current_context[name]
-        except:
-            evaluate_value(name, self.pending_expressions,
-                           self.current_context)
-            return self.current_context[name]
+        return self.namespace.evaluate_value(name)
 
     def set_current_value(self, name, value):
         self.current_context[name] = value
@@ -214,10 +216,8 @@ class ApplyRevertControllerMixin(HasTraits):
         precedence.
         '''
         log.debug('Evaluating pending expressions')
-        if extra_context is not None:
-            self.current_context.update(extra_context)
         self.current_context.update(self.model.data.trait_get(context=True))
-        evaluate_expressions(self.pending_expressions, self.current_context)
+        self.namespace.evaluate_values(extra_context)
 
     @on_trait_change('current_context_items')
     def _apply_context_changes(self, event):
@@ -271,6 +271,8 @@ class ApplyRevertControllerMixin(HasTraits):
                 self.context_labels[name] = trait.label
                 self.context_log[name] = trait.log
         self.shadow_paradigm = self.model.paradigm.clone_traits()
+        expressions = self.shadow_paradigm.trait_get(context=True)
+        self.namespace = ExpressionNamespace(expressions)
 
     def log_trial(self, **kwargs):
         '''

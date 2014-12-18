@@ -69,18 +69,6 @@ def check_sequence(f):
     return wrapper
 
 
-def u(generator):
-    previous_value = None
-    result = generator.next()
-    while True:
-        print 'yielding', result
-        value = (yield result)
-        print previous_value, value
-        if previous_value != value:
-            previous_value = value
-            result = generator.next()
-
-
 @check_sequence
 def ascending(sequence, cycles=np.inf):
     '''
@@ -220,7 +208,6 @@ options = {
     'exact_order':      exact_order,
     'shuffled_set':     shuffled_set,
     'counterbalanced':  counterbalanced,
-    'u':                u,
 }
 
 
