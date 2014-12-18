@@ -70,7 +70,7 @@ def check_sequence(f):
 
 
 @check_sequence
-def ascending(sequence, cycles=np.inf):
+def ascending(sequence, c=np.inf):
     '''
     Returns elements from the sequence in ascending order.  When the last
     element is reached, loop around to the beginning.
@@ -84,15 +84,15 @@ def ascending(sequence, cycles=np.inf):
     3
     '''
     sequence.sort()
-    c = 0
-    while c < cycles:
+    cycle = 0
+    while cycle < c:
         for i in range(len(sequence)):
             yield sequence[i]
-        c += 1
+        cycle += 1
 
 
 @check_sequence
-def descending(sequence, cycles=np.inf):
+def descending(sequence, c=np.inf):
     '''
     Returns elements from the sequence in descending order.  When the last
     element is reached, loop around to the beginning.
@@ -106,11 +106,11 @@ def descending(sequence, cycles=np.inf):
     8
     '''
     sequence.sort(reverse=True)
-    c = 0
-    while c < cycles:
+    cycle = 0
+    while cycle < c:
         for i in range(len(sequence)):
             yield sequence[i]
-        c += 1
+        cycle += 1
 
 
 @check_sequence
@@ -130,7 +130,7 @@ def pseudorandom(sequence, seed=None):
 
 
 @check_sequence
-def exact_order(sequence, cycles=np.inf):
+def exact_order(sequence, c=np.inf):
     '''
     Returns elements in the exact order they are provided.
 
@@ -142,31 +142,31 @@ def exact_order(sequence, cycles=np.inf):
     >>> choice.next()
     8
     '''
-    c = 0
-    while c < cycles:
+    cycle = 0
+    while cycle < c:
         for i in range(len(sequence)):
             yield sequence[i]
-        c += 1
+        cycle += 1
 
 
 @check_sequence
-def shuffled_set(sequence, cycles=np.inf):
+def shuffled_set(sequence, c=np.inf):
     '''
     Returns a randomly selected element from the sequence and removes it from
     the sequence.  Once the sequence is exhausted, repopulate list with the
     original sequence.
     '''
-    c = 0
-    while c < cycles:
+    cycle = 0
+    while cycle < c:
         indices = range(len(sequence))
         np.random.shuffle(indices)  # Shuffle is in-place
         for i in indices:
             yield sequence[i]
-        c += 1
+        cycle += 1
 
 
 @check_sequence
-def counterbalanced(sequence, n, cycles=np.inf):
+def counterbalanced(sequence, n, c=np.inf):
     '''
     Ensures that each value in `sequence` is presented an equal number of times
     over `n` trials.  At the end of the set, will regenerate a new list.  If you
@@ -189,8 +189,8 @@ def counterbalanced(sequence, n, cycles=np.inf):
 
     '''
     sequence = np.asanyarray(sequence)
-    c = 0
-    while c < cycles:
+    cycle = 0
+    while cycle < c:
         full_sequence = np.empty(n, dtype=sequence.dtype)
         sub_sequences = np.array_split(full_sequence, len(sequence))
         for s, value in zip(sub_sequences, sequence):
@@ -198,7 +198,7 @@ def counterbalanced(sequence, n, cycles=np.inf):
         np.random.shuffle(full_sequence)
         for s in full_sequence:
             yield s
-        c += 1
+        cycle += 1
 
 
 options = {
@@ -208,6 +208,10 @@ options = {
     'exact_order':      exact_order,
     'shuffled_set':     shuffled_set,
     'counterbalanced':  counterbalanced,
+
+    # shortcuts
+    'asc':              ascending,
+    'desc':             descending,
 }
 
 

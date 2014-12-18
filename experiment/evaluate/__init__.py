@@ -139,9 +139,10 @@ class ParameterExpression(object):
 
 class ExpressionNamespace(object):
 
-    def __init__(self, expressions, context=None):
+    def __init__(self, expressions, context=None, extra_context=None):
         self._cached_expressions = expressions
         self._catch = []
+        self._extra_context = extra_context
         for e in self._cached_expressions.values():
             if isinstance(e, ParameterExpression):
                 if e._next_when is not None:
@@ -188,6 +189,8 @@ class ExpressionNamespace(object):
         # TODO: how to deal with variables in extra_context that override
         # cached context variables?  Just use once and discard the value?
         context = self._context.copy()
+        if self._extra_context is not None:
+            context.update(self._extra_context)
         if extra_context is not None:
             context.update(extra_context)
 

@@ -82,6 +82,8 @@ class ApplyRevertControllerMixin(HasTraits):
     # List of name, value, label tuples (used for displaying in the GUI)
     current_context_list = List
 
+    extra_context = Dict
+
     def is_running(self):
         raise NotImplementedError
 
@@ -272,7 +274,8 @@ class ApplyRevertControllerMixin(HasTraits):
                 self.context_log[name] = trait.log
         self.shadow_paradigm = self.model.paradigm.clone_traits()
         expressions = self.shadow_paradigm.trait_get(context=True)
-        self.namespace = ExpressionNamespace(expressions)
+        self.namespace = ExpressionNamespace(expressions,
+                                             extra_context=self.extra_context)
 
     def log_trial(self, **kwargs):
         '''

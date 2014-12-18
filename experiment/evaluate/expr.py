@@ -44,16 +44,17 @@ def toss(x=0.5):
     return np.random.uniform() <= x
 
 
-def imult(x, y):
+def imul(x, y):
     '''
     Coerce x to be an integer multiple of y
     '''
-    return round(x/y)*y
+    x = np.asarray(x)
+    return np.round(x/y)*y
 
 
 options = {
     'toss':         toss,
     'h_uniform':    h_uniform,
     'choice':       choice,
-    'imult':        imult,
+    'imul':        imul,
 }
