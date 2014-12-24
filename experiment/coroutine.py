@@ -55,17 +55,18 @@ def blocked(block_size, axis, target):
 
 
 @coroutine
-def psd(target, window_type=None, window_size=None, axis=-1):
-    if window_type is not None:
-        w = signal.get_window(window_type, window_size)
-        w = w/w.mean()
-    else:
-        w = np.ones(window_size)
+def rms(axis, target):
     while True:
-        signal = (yield)
-        csd = np.fft.rfft(signal*w, axis=axis)
-        psd = 2*np.abs(csd)/csd.shape[axis]/np.sqrt(2)
-        target.send(psd)
+        data = (yield)
+        rms = np.mean(data**2, axis=axis)**0.5
+        target.send(rms)
+
+
+@coroutine
+def db(reference, target):
+    while True:
+        data = (yield)
+        target.send(20*np.log10(data/reference))
 
 
 class counter(object):
