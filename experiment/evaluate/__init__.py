@@ -103,7 +103,7 @@ class ParameterExpression(object):
             self._generator = None
 
     def __str__(self):
-        return self._expression
+        return str(self._original_expression)
 
     def __repr__(self):
         return "{}".format(self._expression)

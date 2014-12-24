@@ -26,10 +26,9 @@ class TestExpressions(unittest.TestCase):
             'm':    ParameterExpression('counterbalanced([0, 1, 2], n)'),
             'n':    36,
             'o':    ParameterExpression('ascending([0, 1, 2])'),
-            'p':    ParameterExpression('ascending([0, 1, 2], cycles=1)'),
-            'q':    ParameterExpression('ascending([3, 4, 5], cycles=1)',
-                                        evaluate_when='p'),
-            'r':    ParameterExpression('ascending([0, 1, 2], cycles=1)'),
+            'p':    ParameterExpression('ascending([0, 1, 2], c=1)'),
+            'q':    ParameterExpression('u(ascending([3, 4, 5], c=1), p)'),
+            'r':    ParameterExpression('ascending([0, 1, 2], c=1)'),
         }
         self.ns = ExpressionNamespace(self.parameters)
 
@@ -171,19 +170,19 @@ class TestChoice(unittest.TestCase):
                            choice.exact_order, choice.shuffled_set)
         for selector in basic_selectors:
             # Ensure that we get a StopIteration error
-            c = selector(self.seq, cycles=1)
+            c = selector(self.seq, c=1)
             for i in range(len(self.seq)):
                 c.next()
             self.assertRaises(StopIteration, c.next)
 
             # Ensure we don't get an error at all
-            c = selector(self.seq, cycles=np.inf)
+            c = selector(self.seq, c=np.inf)
             for i in range(len(self.seq)):
                 c.next()
             c.next()
 
             # Ensure we don't get an error at all
-            c = selector(self.seq, cycles=2)
+            c = selector(self.seq, c=2)
             for j in range(2):
                 for i in range(len(self.seq)):
                     c.next()

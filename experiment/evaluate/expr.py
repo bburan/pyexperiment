@@ -52,9 +52,17 @@ def imul(x, y):
     return np.round(x/y)*y
 
 
+def octave_space(start, end, spacing):
+    start_octave = np.log2(start/1e3)
+    end_octave = np.log2(end/1e3)
+    i = np.arange(start_octave, end_octave+spacing, spacing)
+    return (2**i)*1e3
+
+
 options = {
     'toss':         toss,
     'h_uniform':    h_uniform,
     'choice':       choice,
-    'imul':        imul,
+    'imul':         imul,
+    'octave_space': octave_space,
 }
