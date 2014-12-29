@@ -71,14 +71,17 @@ def db(reference, target):
 
 class counter(object):
 
-    def __init__(self, target):
+    def __init__(self, callback, target):
         self._target = target
+        self._callback = callback
         self.n = 0
 
     def send(self, data):
         try:
             self.n += len(data)
             self._target.send(data)
+            if self._callback is not None:
+                self._callback(self.n)
         except:
             raise GeneratorExit
 
