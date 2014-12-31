@@ -3,7 +3,7 @@ import unittest
 import tables
 
 from experiment import (AbstractData, AbstractParadigm, AbstractController,
-                        AbstractExperiment)
+                        AbstractExperiment, depends_on)
 from experiment.evaluate import Expression, ParameterExpression, choice, expr
 
 import numpy as np
@@ -15,12 +15,41 @@ class TestParadigm(AbstractParadigm):
     f1_frequency = Expression('f2_frequency/1.2', **kw)
     f2_frequency = Expression(8e3, **kw)
     level = Expression('exact_order(np.arange(0, 10, 5), c=1)', **kw)
+    trials = Expression('exact_order(np.arange(0, 10, 1), c=1)', **kw)
+    gain = Expression(32, **kw)
+    atten = Expression(0, **kw)
 
 
 class TestController(AbstractController):
 
+    def __init__(self, *args, **kw):
+        self.order = []
+        super(TestController, self).__init__(*args, **kw)
+
     def next_trial(self):
         self.refresh_context()
+
+    @depends_on('level', 'atten')
+    def set_f1_frequency(self, f1_frequency):
+        self.order.append('f1_frequency')
+
+    @depends_on('level')
+    def set_f2_frequency(self, f1_frequency):
+        self.order.append('f2_frequency')
+
+    @depends_on('gain')
+    def set_level(self, level):
+        self.order.append('level')
+
+    def set_gain(self, gain):
+        self.order.append('gain')
+
+    @depends_on('trials')
+    def set_atten(self, atten):
+        self.order.append('atten')
+
+    def set_trials(self, trials):
+        self.order.append('trials')
 
 
 class TestABCSystem(unittest.TestCase):
@@ -38,6 +67,25 @@ class TestABCSystem(unittest.TestCase):
     def tearDown(self):
         self.fh.close()
 
+    def test_eval_order(self):
+        '''
+        Ensure that depends_on are evaluated first
+        '''
+        self.controller.start()
+        for firstval in self.paradigm.get_parameters():
+            self.controller.get_current_value(firstval)
+            self.controller.evaluate_pending_expressions()
+            for a, b in [('gain', 'f1_frequency'),
+                        ('level', 'f1_frequency'),
+                        ('gain', 'level'),
+                        ('atten', 'f1_frequency'),
+                        ('trials', 'atten'),
+                        ('trials', 'f1_frequency'),
+                        ]:
+                ia = self.controller.order.index(a)
+                ib = self.controller.order.index(b)
+                self.assertLess(ia, ib)
+
     def test_next_value(self):
         self.controller.start()
         # Test initial round of values
@@ -50,7 +98,8 @@ class TestABCSystem(unittest.TestCase):
         # Test next round
         self.controller.next_trial()
         self.controller.evaluate_pending_expressions()
-        expected = {'f2_frequency': 8e3, 'f1_frequency': 8e3/1.2, 'level': 5}
+        expected = {'f2_frequency': 8e3, 'f1_frequency': 8e3/1.2, 'level': 5,
+                    'gain': 32, 'atten': 0, 'trials': 1}
         self.assertEqual(self.controller.current_context, expected)
 
         # Test generator exhaustion
