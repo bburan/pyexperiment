@@ -23,6 +23,20 @@ COLOR_NAMES = {
     }
 
 
+def depends_on(*dependencies):
+    '''
+    Decorator for methods on the abstract controller that need to ensure that
+    the value of an expression is computed and applied first.
+    '''
+    def decorator(f):
+        def wrapper(self, *args, **kw):
+            for d in dependencies:
+                self.get_current_value(d)
+            return f(self, *args, **kw)
+        return wrapper
+    return decorator
+
+
 class ContextAdapter(TabularAdapter):
 
     columns = ['Parameter', 'Value', 'Variable']
@@ -327,7 +341,7 @@ class ApplyRevertControllerMixin(HasTraits):
         Return list of dtypes that may be added manually in the controller code.
         This is in addition to the dtypes auto-discovered on the paradigm.
         '''
-        return []
+        return self.extra_dtypes if hasattr(self, 'extra_dtypes') else []
 
     def register_dtypes(self):
         dtypes = self.model.paradigm.get_dtypes()
@@ -342,6 +356,8 @@ class ApplyRevertControllerMixin(HasTraits):
 class AbstractController(ApplyRevertControllerMixin, Controller):
 
     current_trial = Int(0)
+    stop_requested = Bool(False)
+    pause_requested = Bool(False)
 
     '''
     These four states determine what actions are allowed:
@@ -360,11 +376,14 @@ class AbstractController(ApplyRevertControllerMixin, Controller):
             addition, closing the experiment window will generate a
             confirmation pop-up.
 
+        paused
+            The experient is paused.
+
         halted
             The experiment is done and all data has been saved.
     '''
 
-    state = Enum('uninitialized', 'initialized', 'running', 'halted')
+    state = Enum('uninitialized', 'initialized', 'running', 'paused', 'halted')
 
     def init(self, info):
         super(AbstractController, self).init(info)
@@ -418,7 +437,22 @@ class AbstractController(ApplyRevertControllerMixin, Controller):
         self.state = 'running'
 
     def stop(self, info=None):
-        self.stop_experiment(info)
+        self.state = 'halted'
+        self.stop_experiment()
+
+    def pause(self, info=None):
+        raise NotImplementedError
+
+    def resume(self, info=None):
+        self.state = 'running'
+        self.pause_requested = False
+        self.next_trial()
+
+    def request_stop(self, info=None):
+        self.stop_requested = True
+
+    def request_pause(self, info=None):
+        self.pause_requested = True
 
     def next_trial(self):
         '''
@@ -459,5 +493,4 @@ class AbstractController(ApplyRevertControllerMixin, Controller):
         '''
         raise NotImplementedError
         if self.is_running():
-            self.state = 'halted'
             self.model.data.save()
