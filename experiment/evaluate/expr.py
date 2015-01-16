@@ -53,8 +53,18 @@ def imul(x, y):
 
 
 def octave_space(start, end, spacing):
+    '''
+
+    Examples
+    --------
+    >>> print(octave_space(2e3, 16e3, 1))
+    [2000.0, 4000.0, 8000.0, 16000.0]
+    '''
     start_octave = np.log2(start/1e3)
     end_octave = np.log2(end/1e3)
+    # Ensure that requested frequencies fall on the closest requested octave.
+    start_octave = np.round(start_octave/spacing)*spacing
+    end_octave = np.round(end_octave/spacing)*spacing
     i = np.arange(start_octave, end_octave+spacing, spacing)
     return (2**i)*1e3
 

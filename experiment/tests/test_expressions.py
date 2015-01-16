@@ -4,7 +4,7 @@ import numpy as np
 from traits.api import HasTraits, on_trait_change
 
 from experiment.evaluate import (Expression, ParameterExpression,
-                                 ExpressionNamespace, choice)
+                                 ExpressionNamespace, choice, expr)
 
 
 class TestExpressions(unittest.TestCase):
@@ -187,6 +187,26 @@ class TestChoice(unittest.TestCase):
                 for i in range(len(self.seq)):
                     c.next()
             self.assertRaises(StopIteration, c.next)
+
+
+class TestExpr(unittest.TestCase):
+
+    test_octave = [
+        [(2e3, 16e3, 1), [2000.0, 4000.0, 8000.0, 16000.0]],
+        [(2e3, 16e3, 0.5), [2000.0, 2828.42712475, 4000.0, 5656.85424949,
+                            8000.0, 11313.70849898, 16000.0]],
+        [(2.8e3, 16e3, 0.5), [2828.42712475, 4000.0, 5656.85424949, 8000.0,
+                              11313.70849898, 16000.0]],
+        [(5.7e3, 16e3, 0.5), [5656.85424949, 8000.0, 11313.70849898, 16000.0]],
+        [(5.6e3, 16e3, 1), [4000.0, 8000.0, 16000.0]],
+        [(5.7e3, 16e3, 1), [8000.0, 16000.0]],
+    ]
+
+
+    def testOctaveSpace(self):
+        for params, expected in self.test_octave:
+            actual = expr.octave_space(*params)
+            np.testing.assert_array_almost_equal(actual, expected)
 
 
 if __name__ == '__main__':
