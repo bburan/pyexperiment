@@ -1,5 +1,7 @@
 from traits.api import HasTraits
 
+import json
+
 
 class AbstractParadigm(HasTraits):
 
@@ -63,7 +65,21 @@ class AbstractParadigm(HasTraits):
         traits = cls.class_traits(log=True)
         return [(k, v.dtype) for k, v in traits.items()]
 
-    def items(self):
-        for k in self.get_parameters():
+    def items(self, **kw):
+        for k in self.get_parameters(**kw):
             v = getattr(self, k)
             yield k, v
+
+    def write_json(self, filename):
+        with open(filename, 'w') as fh:
+            ignore_types = ('property', 'event', 'python')
+            values = self.trait_get(type=lambda x: x not in ignore_types)
+            json.dump(values, fh, sort_keys=True, indent=4)
+
+    def read_json(self, filename):
+        with open(filename, 'r') as fh:
+            for k, v in json.load(fh).items():
+                try:
+                    setattr(self, k, v)
+                except AttributeError:
+                    print k
