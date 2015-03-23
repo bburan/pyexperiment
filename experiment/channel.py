@@ -656,7 +656,7 @@ class ProcessedMultiChannel(MultiChannel):
         b, a = self.filter_coefficients
         return not np.all(np.abs(np.roots(a)) < 1)
 
-    @on_trait_change('filter_coefficients, diff_matrix')
+    @on_trait_change('filter_coefficients, diff_matrix', post_init=True)
     def _fire_change(self):
         # Objects that use this channel as a datasource need to know when the
         # data changes.  Since changes to the filter coefficients, differential
@@ -781,7 +781,6 @@ class FilterMixin(HasTraits):
         else:
             Wp = self.filter_freq_lp
         Wp = Wp/(0.5*self.fs)
-        self.changed = True
         return signal.iirfilter(self.filter_order, Wp, 60, 2,
                                 ftype=self.filter_type,
                                 btype=self.filter_btype,
