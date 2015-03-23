@@ -29,7 +29,7 @@ class ChannelDataRange(DataRange1D):
         self.refresh()
 
     def get_max_time(self):
-        bounds = [s.get_bounds()[1] for s in self.sources if s.get_size() > 0]
+        bounds = [s.get_bounds()[1] for s in self.sources if s.samples > 0]
         return 0 if len(bounds) == 0 else max(bounds)
 
     @on_trait_change('sources.added')
