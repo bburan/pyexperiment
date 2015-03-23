@@ -8,9 +8,10 @@ from traits.api import (HasTraits, Dict, List, Any, Bool, on_trait_change, Int,
                         Enum)
 from traitsui.api import TabularEditor, Controller
 from traitsui.tabular_adapter import TabularAdapter
-from pyface.api import confirm, YES, error
+from pyface.api import confirm, YES, error, FileDialog, OK
 
 from .evaluate import ExpressionNamespace
+from . import util
 
 COLOR_NAMES = {
     'light green': '#98FB98',
@@ -137,7 +138,10 @@ class ApplyRevertControllerMixin(HasTraits):
         log.debug('Refreshing context')
         self.old_context = self.current_context.copy()
         self.current_context = self.trait_get(context=True)
-        self.current_context.update(self.model.data.trait_get(context=True))
+        try:
+            self.current_context.update(self.model.data.trait_get(context=True))
+        except AttributeError:
+            pass
         self.namespace.reset_values(self.current_context)
         if extra_context is not None:
             for k, v in extra_context.items():
@@ -232,7 +236,10 @@ class ApplyRevertControllerMixin(HasTraits):
         precedence.
         '''
         log.debug('Evaluating pending expressions')
-        self.current_context.update(self.model.data.trait_get(context=True))
+        try:
+            self.current_context.update(self.model.data.trait_get(context=True))
+        except AttributeError:
+            pass
         self.namespace.evaluate_values(extra_context)
 
     @on_trait_change('current_context_items')
@@ -279,13 +286,31 @@ class ApplyRevertControllerMixin(HasTraits):
             context.append((name, str_value, label, log, changed))
         self.current_context_list = sorted(context)
 
+    def _add_context(self, instance):
+        for name, trait in instance.traits(context=True).items():
+            log.debug('Found context variable {}'.format(name))
+            self.context_labels[name] = trait.label
+            self.context_log[name] = trait.log
+
     def initialize_context(self):
         log.debug('Initializing context')
-        for instance in (self.model.data, self.model.paradigm, self):
-            for name, trait in instance.traits(context=True).items():
-                log.debug('Found context variable {}'.format(name))
-                self.context_labels[name] = trait.label
-                self.context_log[name] = trait.log
+
+        # Go through the various objects and pull in context information from
+        # each.  There really should be a better way to accomplish the same
+        # purpose.
+        try:
+            self._add_context(self.model.data)
+        except AttributeError:
+            pass
+        try:
+            self._add_context(self.model.paradigm)
+        except AttributeError:
+            pass
+        try:
+            self._add_context(self.model.self)
+        except AttributeError:
+            pass
+
         self.shadow_paradigm = self.model.paradigm.clone_traits()
         expressions = self.shadow_paradigm.trait_get(context=True)
         self.namespace = ExpressionNamespace(expressions,
@@ -294,39 +319,6 @@ class ApplyRevertControllerMixin(HasTraits):
     def log_trial(self, **kwargs):
         '''
         Add entry to trial log table
-
-        In addition to the data provided via kwargs, the current value of all
-        parameters for that given trial will be included.  The keys of the
-        kwargs dictionary will be used as the column names.
-
-        The first call to log_trial establishes the columns that will be present
-        on every call.  Subsequent calls to log_trial must use the exact same
-        set of keys (e.g. you cannot remove or add new parameters on each call).
-
-        This is a valid sequence of calls:
-
-            self.log_trial(hw_atten=120, noise_seed=4)
-            ...
-            self.log_trial(hw_atten=20, noise_seed=5)
-            ...
-            self.log_trial(hw_atten=30, noise_seed=6)
-            ...
-
-        This is an invalid sequence of calls:
-
-            self.log_trial(hw_atten=120, noise_seed=4)
-            ...
-
-            # Invalid because a keyword argument provided in the first call is
-            # missing
-            self.log_trial(noise_seed=5)
-            ...
-
-            # Invalid because a keyword argument not provided in the first call
-            # has been added
-            self.log_trial(hw_atten=30, noise_seed=6, noise_bandwidth=1000)
-            ...
-
         '''
         log.debug('Logging trial')
         for key, value in self.context_log.items():
@@ -368,7 +360,8 @@ class AbstractController(ApplyRevertControllerMixin, Controller):
             configured yet.
 
         initialized
-            The experiment is ready to start
+            The experiment is ready to start as soon as the user hits the start
+            button.
 
         running
             The experiment is running.  At this point, any changes to
@@ -494,3 +487,18 @@ class AbstractController(ApplyRevertControllerMixin, Controller):
         raise NotImplementedError
         if self.is_running():
             self.model.data.save()
+
+    def save_paradigm(self, path, wildcard, info=None):
+        wildcard_base = wildcard.split('|')[1][1:]
+        fd = FileDialog(action='save as', default_directory=path,
+                        wildcard=wildcard)
+        if fd.open() == OK and fd.path:
+            if not fd.path.endswith(wildcard_base):
+                fd.path += wildcard_base
+            self.model.paradigm.write_json(fd.path)
+
+    def load_paradigm(self, path, wildcard, info=None):
+        fd = FileDialog(action='open', default_directory=path,
+                        wildcard=wildcard)
+        if fd.open() == OK and fd.path:
+            self.model.paradigm.read_json(fd.path)
