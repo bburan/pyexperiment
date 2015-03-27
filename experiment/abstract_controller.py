@@ -32,7 +32,10 @@ def depends_on(*dependencies):
     def decorator(f):
         def wrapper(self, *args, **kw):
             for d in dependencies:
-                self.get_current_value(d)
+                log.debug('Calculating %s for wrapped function %s', d,
+                          f.__name__)
+                if d not in self.namespace._context:
+                    self.get_current_value(d)
             return f(self, *args, **kw)
         return wrapper
     return decorator
@@ -77,22 +80,11 @@ class ApplyRevertControllerMixin(HasTraits):
     # the apply button is pressed.
     shadow_paradigm = Any
 
-    # List of expressions that have not yet been evaluated.
-    pending_expressions = Dict
-
-    # The current value of all context variables
-    current_context = Dict
-
     # Label of the corresponding variable to use in the GUI
     context_labels = Dict
 
     # Should the context variable be logged?
     context_log = Dict
-
-    # Copy of the old context.  Used for comparing with the current context to
-    # determine if a value has changed.  If a value has not changed, then
-    # the set_<parametername> method will not be called.
-    old_context = Dict
 
     # List of name, value, label tuples (used for displaying in the GUI)
     current_context_list = List
@@ -136,18 +128,24 @@ class ApplyRevertControllerMixin(HasTraits):
             next trial begins.
         '''
         log.debug('Refreshing context')
-        self.old_context = self.current_context.copy()
-        self.current_context = self.trait_get(context=True)
-        try:
-            self.current_context.update(self.model.data.trait_get(context=True))
-        except AttributeError:
-            pass
-        self.namespace.reset_values(self.current_context)
         if extra_context is not None:
             for k, v in extra_context.items():
                 self.set_current_value(k, v)
+        else:
+            extra_context = {}
+        extra_context.update(self.gather_extra_context())
+        self.namespace.reset_values(extra_context)
         if evaluate:
             self.evaluate_pending_expressions()
+
+    def get_extra_context(self):
+        return self.extra_context
+
+    def gather_extra_context(self):
+        extra_context = {}
+        extra_context.update(self.get_extra_context())
+        extra_context.update(self.model.data.trait_get(context=True))
+        return extra_context
 
     def apply(self, info=None):
         '''
@@ -162,9 +160,9 @@ class ApplyRevertControllerMixin(HasTraits):
             # all edge cases or situations where actually applying the change
             # causes an error.
             pending_expressions = self.model.paradigm.trait_get(context=True)
-            current_context = self.model.data.trait_get(context=True)
+            extra_context = self.gather_extra_context()
 
-            ns = ExpressionNamespace(pending_expressions, current_context)
+            ns = ExpressionNamespace(pending_expressions, extra_context)
             ns.evaluate_values(dry_run=True)
 
             # If we've made it this far, then let's go ahead and copy the
@@ -209,11 +207,6 @@ class ApplyRevertControllerMixin(HasTraits):
         self.model.paradigm.copy_traits(self.shadow_paradigm)
         self.pending_changes = False
 
-    def value_changed(self, name):
-        new_value = self.get_current_value(name)
-        old_value = self.old_context.get(name, None)
-        return new_value != old_value
-
     def get_current_value(self, name):
         '''
         Get the current value of a context variable.  If the context variable
@@ -221,10 +214,16 @@ class ApplyRevertControllerMixin(HasTraits):
         pending_expressions stack.  Additional context variables may be
         evaluated as needed.
         '''
-        return self.namespace.evaluate_value(name)
+        try:
+            return self.namespace._context[name]
+        except KeyError:
+            value = self.namespace.evaluate_value(name)
+            self._process_context_notifications()
+            return value
 
-    def set_current_value(self, name, value):
-        self.current_context[name] = value
+    #def set_current_value(self, name, value):
+    #    self.current_context[name] = value
+    #    self._process_context_notifications()
 
     def evaluate_pending_expressions(self, extra_context=None):
         '''
@@ -237,54 +236,35 @@ class ApplyRevertControllerMixin(HasTraits):
         '''
         log.debug('Evaluating pending expressions')
         try:
-            self.current_context.update(self.model.data.trait_get(context=True))
+            extra_context.update(self.model.data.trait_get(context=True))
         except AttributeError:
             pass
-        self.namespace.evaluate_values(extra_context)
+        log.debug('Extra context for evaluating expressions: %r', extra_context)
+        for expression in self.namespace:
+            self.namespace.evaluate_value(expression, extra_context)
+            self._process_context_notifications()
 
-    @on_trait_change('current_context_items')
-    def _apply_context_changes(self, event):
-        '''
-        Automatically apply changes as expressions are evaluated and their
-        result added to the context
-        '''
-        names = event.added.keys()
-        names.extend(event.changed.keys())
-        for name in names:
-            old_value = self.old_context.get(name, None)
-            new_value = self.current_context.get(name)
-            if old_value != new_value:
-                mesg = 'changed {} from {} to {}'
-                log.debug(mesg.format(name, old_value, new_value))
+    def _process_context_notifications(self):
+        for k, v in self.namespace._changed_values.items():
+            setter = 'set_{}'.format(k)
+            if hasattr(self, setter):
+                getattr(self, setter)(v)
+        self.namespace._changed_values = {}
 
-                # I used to have this in a try/except block (i.e. using the
-                # Python idiom of "it's better to ask for forgiveness than
-                # permission").  However, it quickly became apparent that this
-                # was masking Exceptions that may be raised in the body of the
-                # setter functions.  We should let these exceptions bubble to
-                # the surface so the user has more information about what
-                # happened.
-                setter = 'set_{}'.format(name)
-                if hasattr(self, setter):
-                    getattr(self, setter)(new_value)
-                    log.debug('setting %s', name)
-                else:
-                    log.debug('no setter for %s', name)
-
-    @on_trait_change('current_context_items')
-    def _update_current_context_list(self):
-        context = []
-        for name, value in self.current_context.items():
-            label = self.context_labels.get(name, '')
-            changed = not self.old_context.get(name, None) == value
-            log = self.context_log[name]
-            if type(value) in ((type([]), type(()))):
-                str_value = ', '.join('{}'.format(v) for v in value)
-                str_value = '[{}]'.format(str_value)
-            else:
-                str_value = '{}'.format(value)
-            context.append((name, str_value, label, log, changed))
-        self.current_context_list = sorted(context)
+    #@on_trait_change('current_context_items')
+    #def _update_current_context_list(self):
+    #    context = []
+    #    for name, value in self.current_context.items():
+    #        label = self.context_labels.get(name, '')
+    #        changed = not self.old_context.get(name, None) == value
+    #        log = self.context_log[name]
+    #        if type(value) in ((type([]), type(()))):
+    #            str_value = ', '.join('{}'.format(v) for v in value)
+    #            str_value = '[{}]'.format(str_value)
+    #        else:
+    #            str_value = '{}'.format(value)
+    #        context.append((name, str_value, label, log, changed))
+    #    self.current_context_list = sorted(context)
 
     def _add_context(self, instance):
         for name, trait in instance.traits(context=True).items():
@@ -294,7 +274,6 @@ class ApplyRevertControllerMixin(HasTraits):
 
     def initialize_context(self):
         log.debug('Initializing context')
-
         # Go through the various objects and pull in context information from
         # each.  There really should be a better way to accomplish the same
         # purpose.
@@ -313,8 +292,8 @@ class ApplyRevertControllerMixin(HasTraits):
 
         self.shadow_paradigm = self.model.paradigm.clone_traits()
         expressions = self.shadow_paradigm.trait_get(context=True)
-        self.namespace = ExpressionNamespace(expressions,
-                                             extra_context=self.extra_context)
+        extra_context = self.gather_extra_context()
+        self.namespace = ExpressionNamespace(expressions, extra_context)
 
     def log_trial(self, **kwargs):
         '''

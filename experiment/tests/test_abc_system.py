@@ -19,6 +19,10 @@ class TestParadigm(AbstractParadigm):
     gain = Expression(32, **kw)
     atten = Expression(0, **kw)
 
+    f3_frequency = Expression(
+        'u(exact_order(np.arange(0, 10, 5), c=1), f3_level)', **kw)
+    f3_level = Expression('exact_order([0, 1, 2])', **kw)
+
 
 class TestController(AbstractController):
 
@@ -51,6 +55,10 @@ class TestController(AbstractController):
     def set_trials(self, trials):
         self.order.append('trials')
 
+    def set_f3_level(self, f3_level):
+        f3_frequency = self.get_current_value('f3_frequency')
+        self.order.append('f3_level')
+
 
 class TestABCSystem(unittest.TestCase):
 
@@ -67,25 +75,6 @@ class TestABCSystem(unittest.TestCase):
     def tearDown(self):
         self.fh.close()
 
-    def test_eval_order(self):
-        '''
-        Ensure that depends_on are evaluated first
-        '''
-        self.controller.start()
-        for firstval in self.paradigm.get_parameters():
-            self.controller.get_current_value(firstval)
-            self.controller.evaluate_pending_expressions()
-            for a, b in [('gain', 'f1_frequency'),
-                        ('level', 'f1_frequency'),
-                        ('gain', 'level'),
-                        ('atten', 'f1_frequency'),
-                        ('trials', 'atten'),
-                        ('trials', 'f1_frequency'),
-                        ]:
-                ia = self.controller.order.index(a)
-                ib = self.controller.order.index(b)
-                self.assertLess(ia, ib)
-
     def test_next_value(self):
         self.controller.start()
         # Test initial round of values
@@ -99,8 +88,9 @@ class TestABCSystem(unittest.TestCase):
         self.controller.next_trial()
         self.controller.evaluate_pending_expressions()
         expected = {'f2_frequency': 8e3, 'f1_frequency': 8e3/1.2, 'level': 5,
-                    'gain': 32, 'atten': 0, 'trials': 1}
-        self.assertEqual(self.controller.current_context, expected)
+                    'gain': 32, 'atten': 0, 'trials': 1, 'f3_level': 0,
+                    'f3_frequency': 0}
+        self.assertEqual(self.controller.namespace._context, expected)
 
         # Test generator exhaustion
         self.controller.next_trial()
@@ -166,6 +156,12 @@ class TestABCSystem(unittest.TestCase):
         self.assertRaises(StopIteration,
                           self.controller.evaluate_pending_expressions)
 
+    def test_nested_eval(self):
+        # Ensure that a value (f3_frequency) which depends on f3_level does not
+        # enter infinite recursion when set_f3_level attempts to query
+        # f3_frequency.
+        self.controller.start()
+        self.controller.get_current_value('f3_frequency')
 
     def test_pending_changes(self):
         self.assertEqual(self.controller.pending_changes, False)

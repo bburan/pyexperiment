@@ -139,16 +139,49 @@ class ParameterExpression(object):
 
 class ExpressionNamespace(object):
 
-    def __init__(self, expressions, context=None, extra_context=None):
+    def __init__(self, expressions, extra_context=None):
         self._cached_expressions = expressions
         self._catch = []
-        self._extra_context = extra_context
         for e in self._cached_expressions.values():
             if isinstance(e, ParameterExpression):
                 if e._next_when is not None:
                     self._catch.append(e._next_when)
                 e.reset()
-        self.reset_values(context)
+        self._context = {}
+        self.reset_values(extra_context)
+
+    def __iter__(self):
+        while self._expressions:
+            yield self._expressions.keys()[0]
+
+    def reset_values(self, extra_context=None):
+        '''
+        Reset all expressions so that they get reevaluated on the next call
+
+        Parameters
+        ----------
+        context : {None, dict}
+            If provided, evaluated values will be stored in this dictionary.
+            This dictionary can also contain extra variables that will be
+            provided to the evaluation namespace.
+        '''
+        self._extra_context = extra_context
+        self._old_context = self._context
+        self._context = {}
+        self._expressions = self._cached_expressions.copy()
+        self._changed_values = {}
+        self._seq_end = [None]
+
+    def reset_generator(self, value):
+        self._cached_expressions[value].reset()
+
+    def set_value(self, parameter, value):
+        log.debug('Setting %s to %r', parameter, value)
+        self._context[parameter] = value
+        if (parameter not in self._old_context) or \
+                (self._old_context[parameter] != value):
+            log.debug('Marking %s as changed', parameter)
+            self._changed_values[parameter] = value
 
     def evaluate_values(self, extra_context=None, dry_run=False):
         while self._expressions:
@@ -163,20 +196,25 @@ class ExpressionNamespace(object):
         parameter.  If an expression is evaluated, it is removed from the stack
         of expressions and added to the context.
         '''
+        log.debug('Evaluating value %s', parameter)
+
         # If the value of the requested parameter has already been computed and
         # stored in the context dictionary, return the context instead.
         if parameter in self._context:
+            log.debug('Value found in context')
             return self._context[parameter]
 
         # Otherwise, find the expression that is used to compute the value of
         # the parameter.  Check to see if the parameter has any dependencies
-        # (i.e.  other unevaluated parameters that need to be comptued first).
+        # (i.e., other unevaluated parameters that need to be comptued first).
         # If so, iterate through those.
+        log.debug('Popping expression from stack')
         expression = self._expressions.pop(parameter)
 
         # Check whether this is a raw value rather than an Expression
         if not isinstance(expression, ParameterExpression):
-            self._context[parameter] = expression
+            log.debug('Raw value provided, using value')
+            self.set_value(parameter, expression)
             return expression
 
         # Evaluate the dependencies first.  Check to see if the dependency is in
@@ -184,10 +222,12 @@ class ExpressionNamespace(object):
         # namespace (e.g. a function name).
         for d in expression._dependencies:
             if d in self._expressions:
+                log.debug('Evaluating dependency %s for %s', d, parameter)
                 self.evaluate_value(d, extra_context, dry_run)
 
         # TODO: how to deal with variables in extra_context that override
         # cached context variables?  Just use once and discard the value?
+        log.debug('Preparing context for evaluating %s', parameter)
         context = self._context.copy()
         if self._extra_context is not None:
             context.update(self._extra_context)
@@ -197,33 +237,18 @@ class ExpressionNamespace(object):
         next_value = expression._next_when in self._seq_end
         try:
             value = expression.evaluate(context, dry_run, next_value)
+            log.debug('Successfully computed value for %s', parameter)
         except StopIteration:
+            log.debug('%s has reached end of sequence', parameter)
             if parameter in self._catch:
+                log.debug('Resetting sequence for %s', parameter)
                 expression.reset()
                 self._seq_end.append(parameter)
                 value = expression.evaluate(context, dry_run, next_value)
             else:
                 raise
-        self._context[parameter] = value
+        self.set_value(parameter, value)
         return value
-
-    def reset_values(self, context=None):
-        '''
-        Reset all expressions so that they get reevaluated on the next call
-
-        Parameters
-        ----------
-        context : {None, dict}
-            If provided, evaluated values will be stored in this dictionary.
-            This dictionary can also contain extra variables that will be
-            provided to the evaluation namespace.
-        '''
-        self._expressions = self._cached_expressions.copy()
-        self._context = {} if context is None else context
-        self._seq_end = [None]
-
-    def reset_generator(self, value):
-        self._cached_expressions[value].reset()
 
 
 class Expression(TraitType):
