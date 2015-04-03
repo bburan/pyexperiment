@@ -55,6 +55,12 @@ def blocked(block_size, axis, target):
 
 
 @coroutine
+def reshape(new_shape, target):
+    while True:
+        data = (yield)
+        target.send(data.reshape(new_shape))
+
+@coroutine
 def rms(axis, target):
     while True:
         data = (yield)
