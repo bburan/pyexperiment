@@ -162,7 +162,8 @@ class ApplyRevertControllerMixin(HasTraits):
             pending_expressions = self.model.paradigm.trait_get(context=True)
             extra_context = self.gather_extra_context()
 
-            ns = ExpressionNamespace(pending_expressions, extra_context)
+            ns = ExpressionNamespace(pending_expressions, extra_context,
+                                     controller=self)
             ns.evaluate_values(dry_run=True)
 
             # If we've made it this far, then let's go ahead and copy the
@@ -217,17 +218,13 @@ class ApplyRevertControllerMixin(HasTraits):
         try:
             return self.namespace._context[name]
         except KeyError:
-            value = self.namespace.evaluate_value(name)
-            self._process_context_notifications()
+            extra_context = self.gather_extra_context()
+            value = self.namespace.evaluate_value(name, extra_context)
             return value
-
-    #def set_current_value(self, name, value):
-    #    self.current_context[name] = value
-    #    self._process_context_notifications()
 
     def evaluate_pending_expressions(self, extra_context=None):
         '''
-        Evaluate all pending expressions and store results in `current_context`.
+        Evaluate all pending expressions
 
         If extra_content is provided, it will be included in the local
         namespace. If extra_content defines the value of a parameter also
@@ -235,36 +232,25 @@ class ApplyRevertControllerMixin(HasTraits):
         precedence.
         '''
         log.debug('Evaluating pending expressions')
-        try:
-            extra_context.update(self.model.data.trait_get(context=True))
-        except AttributeError:
-            pass
-        log.debug('Extra context for evaluating expressions: %r', extra_context)
-        for expression in self.namespace:
-            self.namespace.evaluate_value(expression, extra_context)
-            self._process_context_notifications()
+        if extra_context is None:
+            extra_context = {}
+        extra_context.update(self.gather_extra_context())
+        result = self.namespace.evaluate_values(extra_context)
+        return result
 
-    def _process_context_notifications(self):
-        for k, v in self.namespace._changed_values.items():
-            setter = 'set_{}'.format(k)
-            if hasattr(self, setter):
-                getattr(self, setter)(v)
-        self.namespace._changed_values = {}
-
-    #@on_trait_change('current_context_items')
-    #def _update_current_context_list(self):
-    #    context = []
-    #    for name, value in self.current_context.items():
-    #        label = self.context_labels.get(name, '')
-    #        changed = not self.old_context.get(name, None) == value
-    #        log = self.context_log[name]
-    #        if type(value) in ((type([]), type(()))):
-    #            str_value = ', '.join('{}'.format(v) for v in value)
-    #            str_value = '[{}]'.format(str_value)
-    #        else:
-    #            str_value = '{}'.format(value)
-    #        context.append((name, str_value, label, log, changed))
-    #    self.current_context_list = sorted(context)
+    def _update_current_context_list(self):
+        context = []
+        for name, value in self.namespace._context.items():
+            label = self.context_labels.get(name, '')
+            changed = self.namespace.value_changed(name)
+            log = self.context_log[name]
+            if type(value) in ((type([]), type(()))):
+                str_value = ', '.join('{}'.format(v) for v in value)
+                str_value = '[{}]'.format(str_value)
+            else:
+                str_value = '{}'.format(value)
+            context.append((name, str_value, label, log, changed))
+        self.current_context_list = sorted(context)
 
     def _add_context(self, instance):
         for name, trait in instance.traits(context=True).items():
@@ -293,7 +279,8 @@ class ApplyRevertControllerMixin(HasTraits):
         self.shadow_paradigm = self.model.paradigm.clone_traits()
         expressions = self.shadow_paradigm.trait_get(context=True)
         extra_context = self.gather_extra_context()
-        self.namespace = ExpressionNamespace(expressions, extra_context)
+        self.namespace = ExpressionNamespace(expressions, extra_context,
+                                             controller=self)
 
     def log_trial(self, **kwargs):
         '''
@@ -302,7 +289,7 @@ class ApplyRevertControllerMixin(HasTraits):
         log.debug('Logging trial')
         for key, value in self.context_log.items():
             if value:
-                kwargs[key] = self.current_context[key]
+                kwargs[key] = self.namespace.evaluate_value(key)
         for key, value in self.shadow_paradigm.trait_get(context=True).items():
             kwargs['expression_{}'.format(key)] = '{}'.format(value)
         self.model.data.log_trial(**kwargs)

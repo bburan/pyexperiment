@@ -26,11 +26,8 @@ class TestParadigm(AbstractParadigm):
 
 class TestController(AbstractController):
 
-    def __init__(self, *args, **kw):
-        self.order = []
-        super(TestController, self).__init__(*args, **kw)
-
     def next_trial(self):
+        self.order = []
         self.refresh_context()
 
     @depends_on('level', 'atten')
@@ -75,6 +72,15 @@ class TestABCSystem(unittest.TestCase):
     def tearDown(self):
         self.fh.close()
 
+    def test_notification(self):
+        self.controller.start()
+        self.controller.get_current_value('f1_frequency')
+        expected = {'gain', 'f2_frequency', 'level', 'trials', 'atten',
+                    'f1_frequency'}
+        self.assertEqual(set(self.controller.order), expected)
+        self.assertEqual(len(self.controller.order),
+                         len(set(self.controller.order)))
+
     def test_next_value(self):
         self.controller.start()
         # Test initial round of values
@@ -84,7 +90,6 @@ class TestABCSystem(unittest.TestCase):
         self.assertEqual(8e3, actual)
         self.assertEqual(0, self.controller.get_current_value('level'))
 
-        # Test next round
         self.controller.next_trial()
         self.controller.evaluate_pending_expressions()
         expected = {'f2_frequency': 8e3, 'f1_frequency': 8e3/1.2, 'level': 5,

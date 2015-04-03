@@ -139,7 +139,7 @@ class ParameterExpression(object):
 
 class ExpressionNamespace(object):
 
-    def __init__(self, expressions, extra_context=None):
+    def __init__(self, expressions, extra_context=None, controller=None):
         self._cached_expressions = expressions
         self._catch = []
         for e in self._cached_expressions.values():
@@ -149,10 +149,7 @@ class ExpressionNamespace(object):
                 e.reset()
         self._context = {}
         self.reset_values(extra_context)
-
-    def __iter__(self):
-        while self._expressions:
-            yield self._expressions.keys()[0]
+        self.controller = controller
 
     def reset_values(self, extra_context=None):
         '''
@@ -175,21 +172,54 @@ class ExpressionNamespace(object):
     def reset_generator(self, value):
         self._cached_expressions[value].reset()
 
+    def value_changed(self, parameter):
+        old_value = self._old_context.get(parameter, None)
+        new_value = self._context.get(parameter, None)
+        return old_value != new_value
+
     def set_value(self, parameter, value):
         log.debug('Setting %s to %r', parameter, value)
         self._context[parameter] = value
-        if (parameter not in self._old_context) or \
-                (self._old_context[parameter] != value):
+        if self.value_changed(parameter):
             log.debug('Marking %s as changed', parameter)
             self._changed_values[parameter] = value
 
-    def evaluate_values(self, extra_context=None, dry_run=False):
+    def evaluate_values(self, extra_context=None, notify=True):
         while self._expressions:
-            name = self._expressions.keys()[0]
-            self.evaluate_value(name, extra_context, dry_run)
+            self.evaluate_value(self._expressions.keys()[0], extra_context)
+            if notify:
+                self._process_context_notifications()
+                self.controller._update_current_context_list()
         return self._context
 
-    def evaluate_value(self, parameter, extra_context=None, dry_run=False):
+    def evaluate_value(self, parameter, extra_context=None, dry_run=False,
+                       notify=True):
+        value = self._evaluate_value(parameter, extra_context, dry_run)
+        if notify:
+            self._process_context_notifications()
+            self.controller._update_current_context_list()
+        return value
+
+    def _process_context_notifications(self):
+        '''
+        Once an expression (and all dependencies) has been evaluated, go through
+        and process the appropriate notifications.
+
+        Note
+        ----
+        Historically, the context notifications were processed as each each
+        expression was evaluated; however, this led to some edge-cases where
+        evaluating a dependency expression and calling the notification
+        triggered a recursive loop.
+        '''
+        while self._changed_values:
+            k, v = self._changed_values.popitem()
+            log.debug('Processing context notification for %s', k)
+            setter = 'set_{}'.format(k)
+            if hasattr(self.controller, setter):
+                getattr(self.controller, setter)(v)
+
+    def _evaluate_value(self, parameter, extra_context=None, dry_run=False):
         '''
         Given a stack of expressions and the desired parameter to evaluate,
         evaluates all the expressions necessary to evaluate the desired
@@ -223,7 +253,7 @@ class ExpressionNamespace(object):
         for d in expression._dependencies:
             if d in self._expressions:
                 log.debug('Evaluating dependency %s for %s', d, parameter)
-                self.evaluate_value(d, extra_context, dry_run)
+                self._evaluate_value(d, extra_context, dry_run)
 
         # TODO: how to deal with variables in extra_context that override
         # cached context variables?  Just use once and discard the value?
