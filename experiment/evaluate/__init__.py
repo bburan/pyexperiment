@@ -177,12 +177,19 @@ class ExpressionNamespace(object):
         new_value = self._context.get(parameter, None)
         return old_value != new_value
 
-    def set_value(self, parameter, value):
+    def _set_value(self, parameter, value):
+        # TODO - should we check dependencies?
         log.debug('Setting %s to %r', parameter, value)
         self._context[parameter] = value
         if self.value_changed(parameter):
             log.debug('Marking %s as changed', parameter)
             self._changed_values[parameter] = value
+
+    def set_value(self, parameter, value, notify=True):
+        self._set_value(parameter, value)
+        if notify:
+            self._process_context_notifications()
+            self.controller._update_current_context_list()
 
     def evaluate_values(self, extra_context=None, notify=True):
         while self._expressions:
@@ -244,7 +251,7 @@ class ExpressionNamespace(object):
         # Check whether this is a raw value rather than an Expression
         if not isinstance(expression, ParameterExpression):
             log.debug('Raw value provided, using value')
-            self.set_value(parameter, expression)
+            self._set_value(parameter, expression)
             return expression
 
         # Evaluate the dependencies first.  Check to see if the dependency is in
@@ -277,7 +284,7 @@ class ExpressionNamespace(object):
                 value = expression.evaluate(context, dry_run, next_value)
             else:
                 raise
-        self.set_value(parameter, value)
+        self._set_value(parameter, value)
         return value
 
 
