@@ -226,6 +226,9 @@ class ApplyRevertControllerMixin(HasTraits):
         log.debug('Setting current value for %s to %r', name, value)
         self.namespace.set_value(name, value)
 
+    def value_changed(self, name):
+        return self.namespace.value_changed(name)
+
     def evaluate_pending_expressions(self, extra_context=None):
         '''
         Evaluate all pending expressions
