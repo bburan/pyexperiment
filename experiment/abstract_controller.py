@@ -299,14 +299,22 @@ class ApplyRevertControllerMixin(HasTraits):
                 kwargs[key] = self.namespace.evaluate_value(key)
         for key, value in self.shadow_paradigm.trait_get(context=True).items():
             kwargs['expression_{}'.format(key)] = '{}'.format(value)
+        for key, value in self.trait_get(log=True).items():
+            kwargs[key] = value
         self.model.data.log_trial(**kwargs)
 
-    def get_dtypes(self):
+    @classmethod
+    def get_dtypes(cls):
         '''
         Return list of dtypes that may be added manually in the controller code.
         This is in addition to the dtypes auto-discovered on the paradigm.
         '''
-        return self.extra_dtypes if hasattr(self, 'extra_dtypes') else []
+        traits = cls.class_traits(log=True)
+        dtypes = [(k, v.dtype) for k, v in traits.items()]
+        if hasattr(cls, 'extra_dtypes'):
+            dtypes.extend(cls.extra_dtypes)
+        dtypes.sort()
+        return dtypes
 
     def register_dtypes(self):
         dtypes = self.model.paradigm.get_dtypes()

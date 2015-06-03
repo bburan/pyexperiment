@@ -63,7 +63,9 @@ class AbstractParadigm(HasTraits):
     @classmethod
     def get_dtypes(cls):
         traits = cls.class_traits(log=True)
-        return [(k, v.dtype) for k, v in traits.items()]
+        dtypes = [(k, v.dtype) for k, v in traits.items()]
+        dtypes.sort()
+        return dtypes
 
     def items(self, **kw):
         for k in self.get_parameters(**kw):
