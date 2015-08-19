@@ -1,3 +1,6 @@
+import logging
+log = logging.getLogger(__name__)
+
 import time
 import numpy as np
 
@@ -60,6 +63,7 @@ def reshape(new_shape, target):
         data = (yield)
         target.send(data.reshape(new_shape))
 
+
 @coroutine
 def rms(axis, target):
     while True:
@@ -88,7 +92,8 @@ class counter(object):
             self._target.send(data)
             if self._callback is not None:
                 self._callback(self.n)
-        except:
+        except Exception as e:
+            log.exception(e)
             raise GeneratorExit
 
 
