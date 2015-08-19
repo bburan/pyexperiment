@@ -80,6 +80,9 @@ class ApplyRevertControllerMixin(HasTraits):
     # the apply button is pressed.
     shadow_paradigm = Any
 
+    # TODO: push as much of these variables below into the ExpressionNamespace
+    # as possible
+
     # Label of the corresponding variable to use in the GUI
     context_labels = Dict
 
@@ -94,14 +97,20 @@ class ApplyRevertControllerMixin(HasTraits):
     def is_running(self):
         raise NotImplementedError
 
-    @on_trait_change('model.paradigm.+container*.+context, +context')
+    @on_trait_change('model.paradigm.+container*.+context')
     def handle_change(self, instance, name, old, new):
-        # When a paradigm value has changed while the experiment is running,
-        # indicate that changes are pending
+        # Check to see if experiment is currently running.  If not, don't cache
+        # change.
         if not self.is_running():
             return
-        log.debug('Detected change to %s', name)
+
+        # Ensure 'context' metadata is set to True otherwise skip this trait (we
+        # can set context to False sometimes).
         trait = instance.trait(name)
+        if not trait.context:
+            return
+
+        log.debug('Detected change to %s', name)
         if trait.immediate:
             self.set_current_value(name, new)
         else:

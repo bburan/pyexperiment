@@ -294,6 +294,10 @@ class Expression(TraitType):
     '''
     info_text = 'a Python value or expression'
     default_value = ParameterExpression('None')
+    metadata = {
+        'context': True,
+        'log': True,
+    }
 
     def init(self):
         if not isinstance(self.default_value, ParameterExpression):
