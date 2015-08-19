@@ -791,37 +791,21 @@ class EpochChannel(Channel):
 
     epoch_duration = Float(attr=True)
     epoch_size = Property(Int, depends_on='fs, epoch_duration', transient=True)
-    timestamps = Any
 
     @cached_property
     def _get_epoch_size(self):
         return int(self.epoch_duration*self.fs)
 
-    def _timestamps_default(self):
-        # TODO - need to make this a mixin
-        atom = tables.Atom.from_dtype(np.dtype('int32'))
-        rows = int(self.fs*self.expected_duration)
-        if self.name + '_ts' in self.node and self.overwrite:
-            self.node._f_get_child(self.name + '_ts')._f_remove()
-        earray = self.node._v_file.createEArray(self.node._v_pathname, self.name
-                                                + '_ts', atom, (0,),
-                                                expectedrows=rows)
-        return earray
-
     def _get_initial_shape(self):
         return (0, self.epoch_size)
 
-    def send(self, data, timestamp=np.nan):
+    def send(self, data):
         data.shape = (-1, self.epoch_size)
-        self.send_all(data, [timestamp])
+        self.send_all(data)
 
-    def send_all(self, data, timestamps=None):
+    def send_all(self, data):
         epochs = len(data)
         self._buffer.append(data)
-        if timestamps is None:
-            timestamps = [np.nan]*epochs
-        self.timestamps.append(timestamps)
-        self.added = data, timestamps
         self._buffer.flush()
 
     def get_epochs(self, reject_threshold=None):
@@ -853,6 +837,31 @@ class EpochChannel(Channel):
                         rms=False, window=None):
         psd = self.get_psd(reject_threshold, waveform_averages, rms, window)
         return psd.mean(axis=0)
+
+
+class TimestampEpochChannel(EpochChannel):
+
+    timestamps = Instance('tables.EArray')
+
+    def _timestamps_default(self):
+        atom = tables.Atom.from_dtype(np.dtype('int32'))
+        rows = int(self.fs*self.expected_duration)
+        if self.name + '_ts' in self.node and self.overwrite:
+            self.node._f_get_child(self.name + '_ts')._f_remove()
+        earray = self.node._v_file.createEArray(self.node._v_pathname, self.name
+                                                + '_ts', atom, (0,),
+                                                expectedrows=rows)
+        return earray
+
+    def send(self, data, timestamps):
+        data.shape = (-1, self.epoch_size)
+        self.send_all(data, [timestamps])
+
+    def send_all(self, data, timestamps):
+        epochs = len(data)
+        self._buffer.append(data)
+        self.timestamps.append(data)
+        self._buffer.flush()
 
 
 class FilteredEpochChannel(FilterMixin, EpochChannel):
