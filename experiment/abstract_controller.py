@@ -144,7 +144,8 @@ class ApplyRevertControllerMixin(HasTraits):
     def gather_extra_context(self):
         extra_context = {}
         extra_context.update(self.get_extra_context())
-        extra_context.update(self.model.data.trait_get(context=True))
+        if hasattr(self.model, 'data'):
+            extra_context.update(self.model.data.trait_get(context=True))
         return extra_context
 
     def apply(self, info=None):
