@@ -14,7 +14,7 @@ class ChannelDataRange(DataRange1D):
     trig_delay = Float(5)
     trigger = Float(0)
     update_mode = Enum('auto', 'auto full', 'triggered')
-    scroll_period = Float(20)
+    #scroll_period = Float(20)
 
     def _trigger_changed(self):
         self.refresh()
@@ -66,17 +66,3 @@ class ChannelDataRange(DataRange1D):
             self._low_value = low_value
             self._high_value = high_value
             self.updated = (low_value, high_value)
-
-    #def _sources_changed(self, old, new):
-    #    for source in old:
-    #        source.on_trait_change(self.refresh, 'added', remove=True)
-    #    for source in new:
-    #        source.on_trait_change(self.refresh, 'added')
-    #    self.refresh()
-
-    #def _sources_items_changed(self, event):
-    #    for source in event.removed:
-    #        source.on_trait_change(self.refresh, 'added', remove=True)
-    #    for source in event.added:
-    #        source.on_trait_change(self.refresh, 'added')
-    #    self.refresh()
