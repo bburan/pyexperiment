@@ -26,6 +26,16 @@ def coroutine(func):
     return start
 
 
+def create_pipeline(*args):
+    current = args[-1]
+    # Initialize final step in pipeline if it hasn't been already.
+    if hasattr(current, '__call__'):
+        current = current()
+    for b in args[-2::-1]:
+        current = b(current)
+    return current
+
+
 ################################################################################
 # Coroutines
 ################################################################################
@@ -58,6 +68,18 @@ def blocked(block_size, axis, target):
 
 
 @coroutine
+def accumulate(n, target):
+    data = []
+    while True:
+        d = (yield)[np.newaxis]
+        data.append(d)
+        if len(data) == n:
+            data = np.concatenate(data)
+            target.send(data)
+            data = []
+
+
+@coroutine
 def reshape(new_shape, target):
     while True:
         data = (yield)
@@ -81,20 +103,26 @@ def db(reference, target):
 
 class counter(object):
 
-    def __init__(self, callback, target):
-        self._target = target
+    def __init__(self, callback):
         self._callback = callback
         self.n = 0
 
     def send(self, data):
         try:
             self.n += len(data)
-            self._target.send(data)
             if self._callback is not None:
                 self._callback(self.n)
         except Exception as e:
             log.exception(e)
             raise GeneratorExit
+
+
+@coroutine
+def broadcast(*targets):
+    while True:
+        input = (yield)
+        for target in targets:
+            target.send(input)
 
 
 ################################################################################
@@ -107,11 +135,7 @@ def printer():
 
 
 @coroutine
-def accumulate(data, n):
-    acquired = 0
+def call(target):
     while True:
-        if acquired >= n:
-            raise GeneratorExit
-        d = (yield)
-        acquired += 1
-        data.append(d)
+        data = (yield)
+        target(data)
