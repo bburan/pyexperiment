@@ -18,7 +18,7 @@ def decimate_rms(data, downsample):
     # Determine the "fragment" size that we are unable to decimate.  A
     # downsampling factor of 5 means that we perform the operation in chunks of
     # 5 samples.  If we have only 13 samples of data, then we cannot decimate
-    # the last 3 samples and will simply discard them. 
+    # the last 3 samples and will simply discard them.
     last_dim = data.ndim
     offset = data.shape[-1] % downsample
 
@@ -38,7 +38,7 @@ def decimate_simple(data, downsample):
     # Determine the "fragment" size that we are unable to decimate.  A
     # downsampling factor of 5 means that we perform the operation in chunks of
     # 5 samples.  If we have only 13 samples of data, then we cannot decimate
-    # the last 3 samples and will simply discard them. 
+    # the last 3 samples and will simply discard them.
     return data[..., ::downsample]
 
 def decimate_extremes(data, downsample):
@@ -51,7 +51,7 @@ def decimate_extremes(data, downsample):
     # Determine the "fragment" size that we are unable to decimate.  A
     # downsampling factor of 5 means that we perform the operation in chunks of
     # 5 samples.  If we have only 13 samples of data, then we cannot decimate
-    # the last 3 samples and will simply discard them. 
+    # the last 3 samples and will simply discard them.
     last_dim = data.ndim
     offset = data.shape[-1] % downsample
 
@@ -66,7 +66,7 @@ def decimate_extremes(data, downsample):
     return data.min(last_dim), data.max(last_dim)
 
 class ExtremesChannelPlot(ChannelPlot):
-    
+
     _cached_min     = Any
     _cached_max     = Any
 
@@ -79,9 +79,6 @@ class ExtremesChannelPlot(ChannelPlot):
         self._cached_min = None
         self._cached_max = None
         super(ExtremesChannelPlot, self)._invalidate_data()
-
-    def _data_changed(self):
-        self._invalidate_data()
 
     def _dec_points_changed(self):
         # Flush the downsampled cache since it is no longer valid
@@ -113,15 +110,12 @@ class ExtremesChannelPlot(ChannelPlot):
         mapped = self._map_screen(self._cached_data)
         t = self.index_values[:mapped.shape[-1]]
         t_screen = self.index_mapper.map_screen(t)
-        self._cached_screen_data = mapped 
+        self._cached_screen_data = mapped
         self._cached_screen_index = t_screen
         self._screen_cache_valid = True
 
-    def _map_screen(self, data):
-        return self.value_mapper.map_screen(data)
-
     def _compute_screen_points_decimated(self):
-        # We cache our prior decimations 
+        # We cache our prior decimations
         if self._cached_min is not None:
             n_cached = self._cached_min.shape[-1]*self.dec_factor
             to_decimate = self._cached_data[..., n_cached:]
@@ -145,27 +139,15 @@ class ExtremesChannelPlot(ChannelPlot):
         self._cached_screen_index = t_screen
         self._screen_cache_valid = True
 
-    def _render(self, gc, points):
-        if len(points[0]) == 0:
-            return
-
-        with gc:
-            gc.clip_to_rect(self.x, self.y, self.width, self.height)
-            gc.set_stroke_color(self.line_color_)
-            gc.set_line_width(self.line_width) 
-
-            gc.begin_path()
-            if self.draw_mode == 'normal':
-                idx, val = points
-                gc.lines(np.c_[idx, val])
-            else:
-                idx, (mins, maxes) = points
-                starts = np.column_stack((idx, mins))
-                ends = np.column_stack((idx, maxes))
-                gc.line_set(starts, ends)
-
-            gc.stroke_path()
-            self._draw_default_axes(gc)
+    def _render_points(self, gc, points):
+        if self.draw_mode == 'normal':
+            idx, val = points
+            gc.lines(np.c_[idx, val])
+        else:
+            idx, (mins, maxes) = points
+            starts = np.column_stack((idx, mins))
+            ends = np.column_stack((idx, maxes))
+            gc.line_set(starts, ends)
 
     traits_view = View(
             Item('dec_points', label='Samples per pixel'),

@@ -103,16 +103,19 @@ class ChannelPlot(BaseChannelPlot):
         points = self._get_screen_points()
         self._render(gc, points)
 
+    def _render_points(self, gc, points):
+        gc.lines(np.c_[points])
+
     def _render(self, gc, points):
         if len(points[0]) == 0:
             return
         with gc:
-            gc.set_antialias(True)
+            #gc.set_antialias(True)
             gc.clip_to_rect(self.x, self.y, self.width, self.height)
             gc.set_stroke_color(self.line_color_)
             gc.set_line_width(self.line_width)
             gc.begin_path()
-            gc.lines(np.c_[points])
+            self._render_points(gc, points)
             gc.stroke_path()
             self._draw_default_axes(gc)
 

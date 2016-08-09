@@ -1,12 +1,13 @@
 from traits.api import Float, on_trait_change, Bool, Instance, Enum
 from enable.api import BaseTool, KeySpec
 
+
 class ChannelRangeTool(BaseTool):
 
     # Can the user adjust the trigger delay by dragging with the left mouse
     # button?  This is not always desirable, so we allow disabling of the drag
     # feature.
-    allow_drag  = Bool(True)
+    allow_drag = Bool(True)
 
     # To disable zooming along one of the axes, set the corresponding factor to
     # 1.0.
@@ -117,6 +118,7 @@ class ChannelRangeTool(BaseTool):
         if event.window.mouse_owner == self:
             event.window.set_mouse_owner(None)
         event.handled = True
+
 
 class MultiChannelRangeTool(ChannelRangeTool):
 
