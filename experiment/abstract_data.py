@@ -3,6 +3,7 @@ log = logging.getLogger(__name__)
 
 import numpy as np
 from traits.api import Any, Event, HasTraits, Property, cached_property
+from traitsui.api import View
 
 
 class AbstractData(HasTraits):
@@ -17,18 +18,19 @@ class AbstractData(HasTraits):
 
     @cached_property
     def _get_fh(self):
-        return self.store_node._v_file
+        if self.store_node is not None:
+            return self.store_node._v_file
 
     def register_dtypes(self, dtypes):
         description = np.dtype(dtypes)
         self.trial_log_description = description
-        self.trial_log = self.fh.createTable(self.store_node, 'trial_log',
-                                             description)
+        self.trial_log = self.fh.create_table(self.store_node, 'trial_log',
+                                              description)
 
     def _event_log_default(self):
         dtype = [('timestamp', 'f'), ('name', 'S64')]
         description = np.dtype(dtype)
-        node = self.fh.createTable(self.store_node, 'event_log', description)
+        node = self.fh.create_table(self.store_node, 'event_log', description)
         return node
 
     def log_event(self, timestamp, event):
@@ -52,3 +54,5 @@ class AbstractData(HasTraits):
         for name, value in kwargs.items():
             self.store_node._f_setAttr(name, value)
         self.fh.flush()
+
+    traits_view = View()

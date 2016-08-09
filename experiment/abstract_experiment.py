@@ -1,5 +1,5 @@
 from traits.api import HasTraits, Instance
-from traitsui.api import VGroup, Item, TabularEditor
+from traitsui.api import VGroup, Item, TabularEditor, HGroup, View
 from traitsui.tabular_adapter import TabularAdapter
 
 
@@ -30,4 +30,12 @@ class AbstractExperiment(HasTraits):
         Item('handler.current_context_list', editor=context_editor),
         show_labels=False,
         label='Current Context',
+    )
+
+    traits_view = View(
+        HGroup(
+            Item('paradigm', style='custom'),
+            Item('data', style='custom'),
+            show_labels=False,
+        )
     )
